@@ -338,6 +338,14 @@ components:
           type: string
           enum: [TREND, REVERSAL]
           description: TREND = trend-following (HIGH priority); REVERSAL = counter-trend (LOW priority).
+        higherTrend:
+          type: string
+          enum: [BULLISH, BEARISH, NEUTRAL]
+          description: 15m higher-timeframe trend direction used for MTF confirmation.
+        mtfStatus:
+          type: string
+          enum: [ALIGNED, BLOCKED, COUNTER_TREND, "N/A"]
+          description: Multi-timeframe alignment status between entry TF and 15m trend.
         timeframe:
           type: string
         indicators:

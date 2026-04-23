@@ -76,6 +76,31 @@ export const ScalperSignalResponseSignalType = {
   REVERSAL: "REVERSAL",
 } as const;
 
+/**
+ * 15m higher-timeframe trend direction used for MTF confirmation.
+ */
+export type ScalperSignalResponseHigherTrend =
+  (typeof ScalperSignalResponseHigherTrend)[keyof typeof ScalperSignalResponseHigherTrend];
+
+export const ScalperSignalResponseHigherTrend = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
+/**
+ * Multi-timeframe alignment status between entry TF and 15m trend.
+ */
+export type ScalperSignalResponseMtfStatus =
+  (typeof ScalperSignalResponseMtfStatus)[keyof typeof ScalperSignalResponseMtfStatus];
+
+export const ScalperSignalResponseMtfStatus = {
+  ALIGNED: "ALIGNED",
+  BLOCKED: "BLOCKED",
+  COUNTER_TREND: "COUNTER_TREND",
+  "N/A": "N/A",
+} as const;
+
 export interface ScalperSignalResponse {
   signal: ScalperSignalResponseSignal;
   confidence: number;
@@ -90,6 +115,10 @@ export interface ScalperSignalResponse {
   signalStatus?: ScalperSignalResponseSignalStatus;
   /** TREND = trend-following (HIGH priority); REVERSAL = counter-trend (LOW priority). */
   signalType?: ScalperSignalResponseSignalType;
+  /** 15m higher-timeframe trend direction used for MTF confirmation. */
+  higherTrend?: ScalperSignalResponseHigherTrend;
+  /** Multi-timeframe alignment status between entry TF and 15m trend. */
+  mtfStatus?: ScalperSignalResponseMtfStatus;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: string;

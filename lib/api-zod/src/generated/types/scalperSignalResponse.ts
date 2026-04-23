@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ScalperIndicators } from "./scalperIndicators";
+import type { ScalperSignalResponseHigherTrend } from "./scalperSignalResponseHigherTrend";
 import type { ScalperSignalResponseMarketMode } from "./scalperSignalResponseMarketMode";
+import type { ScalperSignalResponseMtfStatus } from "./scalperSignalResponseMtfStatus";
 import type { ScalperSignalResponseSignal } from "./scalperSignalResponseSignal";
 import type { ScalperSignalResponseSignalStatus } from "./scalperSignalResponseSignalStatus";
 import type { ScalperSignalResponseSignalType } from "./scalperSignalResponseSignalType";
@@ -26,6 +28,10 @@ export interface ScalperSignalResponse {
   signalStatus?: ScalperSignalResponseSignalStatus;
   /** TREND = trend-following (HIGH priority); REVERSAL = counter-trend (LOW priority). */
   signalType?: ScalperSignalResponseSignalType;
+  /** 15m higher-timeframe trend direction used for MTF confirmation. */
+  higherTrend?: ScalperSignalResponseHigherTrend;
+  /** Multi-timeframe alignment status between entry TF and 15m trend. */
+  mtfStatus?: ScalperSignalResponseMtfStatus;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: Date;

@@ -61,6 +61,18 @@ export const GetSignalResponse = zod.object({
     .describe(
       "TREND = trend-following (HIGH priority); REVERSAL = counter-trend (LOW priority).",
     ),
+  higherTrend: zod
+    .enum(["BULLISH", "BEARISH", "NEUTRAL"])
+    .optional()
+    .describe(
+      "15m higher-timeframe trend direction used for MTF confirmation.",
+    ),
+  mtfStatus: zod
+    .enum(["ALIGNED", "BLOCKED", "COUNTER_TREND", "N/A"])
+    .optional()
+    .describe(
+      "Multi-timeframe alignment status between entry TF and 15m trend.",
+    ),
   timeframe: zod.string(),
   indicators: zod.object({
     rsi: zod.number(),

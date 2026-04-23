@@ -42,6 +42,8 @@ interface SignalResult {
   signalLabel?: string;
   signalStatus?: "PENDING" | "CONFIRMED";
   signalType?: "TREND" | "REVERSAL";
+  higherTrend?: "BULLISH" | "BEARISH" | "NEUTRAL";
+  mtfStatus?: "ALIGNED" | "BLOCKED" | "COUNTER_TREND" | "N/A";
   timeframe: string;
   indicators: Indicators;
   timestamp: string;
@@ -637,6 +639,69 @@ function isStrongReversal(
   return ind.rsi > 70 && macdBearCross && !ind.lastCandleBullish;
 }
 
+// ── Multi-Timeframe Confirmation ──────────────────────────────────────────────
+// Higher TF (15m) defines trend direction; lower TF (5m/1m) defines entries.
+// • Aligned     → +20 confidence, mtfStatus = "ALIGNED"
+// • Counter-trend → −20 confidence, requires trap/strong-reversal AND conf ≥ 75
+//                  to survive; otherwise downgraded to HOLD with mtfStatus="BLOCKED"
+// • 15m NEUTRAL → no boost, mtfStatus = "N/A" (signal passes through unchanged)
+function applyMtfConfirmation(
+  raw: Omit<SignalResult, "timestamp">,
+  higherTrend: HigherTrend,
+  timeframe: string,
+): Omit<SignalResult, "timestamp"> {
+  // HOLDs and 15m-itself just get the trend tag for UI; no rules applied.
+  if (raw.signal === "HOLD" || timeframe === "15m") {
+    return { ...raw, higherTrend, mtfStatus: "N/A" };
+  }
+
+  if (higherTrend === "NEUTRAL") {
+    return { ...raw, higherTrend, mtfStatus: "N/A" };
+  }
+
+  const aligned =
+    (raw.signal === "BUY"  && higherTrend === "BULLISH") ||
+    (raw.signal === "SELL" && higherTrend === "BEARISH");
+
+  if (aligned) {
+    return {
+      ...raw,
+      higherTrend,
+      mtfStatus: "ALIGNED",
+      confidence: Math.min(99, raw.confidence + 20),
+    };
+  }
+
+  // Counter-trend path — only allowed for trap/stop-hunt OR strong reversal,
+  // and only if post-penalty confidence is still ≥ 75.
+  const isTrap = !!raw.signalLabel && (
+    raw.signalLabel.includes("FAKE BREAKOUT") ||
+    raw.signalLabel.includes("FAKE BREAKDOWN") ||
+    raw.signalLabel.includes("STOP HUNT")
+  );
+  const isReversal = !!raw.signalLabel && raw.signalLabel.includes("REVERSAL");
+  const penalised  = Math.max(0, raw.confidence - 20);
+
+  if ((isTrap || isReversal) && penalised >= 75) {
+    return {
+      ...raw,
+      higherTrend,
+      mtfStatus: "COUNTER_TREND",
+      confidence: penalised,
+    };
+  }
+
+  // Block: convert to HOLD but preserve original signal info for UI clarity.
+  return {
+    ...raw,
+    signal: "HOLD",
+    confidence: Math.max(20, penalised),
+    higherTrend,
+    mtfStatus: "BLOCKED",
+    signalLabel: `MTF BLOCKED (${raw.signal} vs ${higherTrend})`,
+  };
+}
+
 // ── Full Filter Pipeline ───────────────────────────────────────────────────────
 // Order: confidence → priority → cooldown → reversal lock → 2-candle confirmation
 function applyFilters(
@@ -732,6 +797,42 @@ let signal5mExpiry = 0;
 
 let cachedSignal1m: SignalResult | null = null;
 let signal1mExpiry = 0;
+
+// ── Higher-timeframe (15m) trend cache ───────────────────────────────────────
+type HigherTrend = "BULLISH" | "BEARISH" | "NEUTRAL";
+let cachedHigherTrend: HigherTrend = "NEUTRAL";
+let higherTrendExpiry = 0;
+
+async function getHigherTrend(): Promise<HigherTrend> {
+  if (Date.now() < higherTrendExpiry) return cachedHigherTrend;
+
+  const ohlc = await fetchYahooFinance("GC=F", "15m", "5d");
+  const closes = ohlc ? cleanArray(ohlc.close).filter(c => c > 0) : [];
+
+  if (closes.length < 50) {
+    // Don't override cache on transient fetch failure — keep last known trend
+    higherTrendExpiry = Date.now() + 15_000;
+    return cachedHigherTrend;
+  }
+
+  const ema20Arr = calcEMA(closes, 20);
+  const ema50Arr = calcEMA(closes, 50);
+  const ema20 = ema20Arr[ema20Arr.length - 1];
+  const ema50 = ema50Arr[ema50Arr.length - 1];
+
+  // Require small separation to avoid noisy "trend" labels when EMAs are
+  // basically on top of each other (sideways 15m).
+  const last = closes[closes.length - 1];
+  const sepPct = Math.abs(ema20 - ema50) / last;
+  let trend: HigherTrend;
+  if (sepPct < 0.0005)      trend = "NEUTRAL";
+  else if (ema20 > ema50)   trend = "BULLISH";
+  else                       trend = "BEARISH";
+
+  cachedHigherTrend  = trend;
+  higherTrendExpiry  = Date.now() + 60_000; // 15m candles only update slowly
+  return trend;
+}
 
 export async function getLivePrice(): Promise<PriceData> {
   const finnhub  = getFinnhubPrice();             // OANDA:XAU_USD spot via WS
@@ -834,8 +935,13 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
   const interval = is1m ? "1m" : "5m";
   const range    = is1m ? "1h" : "1d";
 
-  const ohlc      = await fetchYahooFinance("GC=F", interval, range);
-  const priceData = await getLivePrice();
+  // Fetch entry-TF candles, live spot price, and the higher-TF (15m) trend
+  // in parallel — they're independent.
+  const [ohlc, priceData, higherTrend] = await Promise.all([
+    fetchYahooFinance("GC=F", interval, range),
+    getLivePrice(),
+    getHigherTrend(),
+  ]);
   const currentPrice = priceData.price;
 
   const tfKey = timeframe;
@@ -888,8 +994,9 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     ohlc?.timestamps?.[ohlc.timestamps.length - 1] ??
     Math.floor(Date.now() / (is1m ? 60_000 : 300_000));
 
-  const rawResult     = generateSignal(indicators, currentPrice, timeframe);
-  const filteredResult = applyFilters(rawResult, tfKey, currentPrice, lastCandleTs, indicators);
+  const rawResult      = generateSignal(indicators, currentPrice, timeframe);
+  const mtfAdjusted    = applyMtfConfirmation(rawResult, higherTrend, timeframe);
+  const filteredResult = applyFilters(mtfAdjusted, tfKey, currentPrice, lastCandleTs, indicators);
 
   // Record a confirmed signal — starts the 3-min cooldown
   if (filteredResult.signal !== "HOLD" && filteredResult.signalStatus === "CONFIRMED") {

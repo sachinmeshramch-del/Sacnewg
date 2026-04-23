@@ -184,6 +184,44 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
+              {/* Multi-Timeframe Confirmation panel */}
+              {(data.higherTrend || data.mtfStatus) && (
+                <div className="mt-3 w-full max-w-[260px] mx-auto rounded-md border border-border/40 bg-card/40 px-3 py-2 text-[10px] tracking-wide space-y-1">
+                  {data.higherTrend && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Higher TF (15m)</span>
+                      <span className={cn(
+                        "font-bold",
+                        data.higherTrend === "BULLISH" && "text-success",
+                        data.higherTrend === "BEARISH" && "text-destructive",
+                        data.higherTrend === "NEUTRAL" && "text-muted-foreground",
+                      )}>{data.higherTrend}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Entry TF ({data.timeframe})</span>
+                    <span className={cn(
+                      "font-bold",
+                      data.signal === "BUY"  && "text-success",
+                      data.signal === "SELL" && "text-destructive",
+                      data.signal === "HOLD" && "text-muted-foreground",
+                    )}>{data.signal}</span>
+                  </div>
+                  {data.mtfStatus && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">MTF Status</span>
+                      <span className={cn(
+                        "font-bold tracking-widest",
+                        data.mtfStatus === "ALIGNED"       && "text-success",
+                        data.mtfStatus === "BLOCKED"       && "text-destructive",
+                        data.mtfStatus === "COUNTER_TREND" && "text-warning",
+                        data.mtfStatus === "N/A"           && "text-muted-foreground",
+                      )}>{data.mtfStatus.replace("_", "-")}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Status + Type badges */}
               {data.signal !== "HOLD" && (data.signalStatus || data.signalType) && (
                 <div className="mt-3 flex items-center gap-2 flex-wrap justify-center">
