@@ -1,0 +1,175 @@
+Build a full-stack web app for generating real-time scalping signals for XAUUSD (Gold). The app must be fast, accurate, and optimized for forex/commodity behavior (NOT crypto logic).
+
+---
+
+📡 DATA SOURCE (IMPORTANT)
+
+- Use Finnhub WebSocket for real-time gold price:
+  wss://ws.finnhub.io?token=YOUR_API_KEY
+- Subscribe to: "OANDA:XAU_USD"
+- Add fallback REST API
+
+---
+
+📊 INDICATORS (OPTIMIZED FOR GOLD)
+
+- EMA 20 (fast trend)
+- EMA 50 (major trend)
+- RSI (14)
+- MACD (12,26,9)
+- ATR (14)
+- Volume (if available, else ignore)
+
+---
+
+🧠 MARKET MODE DETECTION
+
+TRENDING:
+
+- EMA20 above EMA50 → bullish trend
+- EMA20 below EMA50 → bearish trend
+
+SIDEWAYS:
+
+- EMA20 and EMA50 are flat and close together
+- Price moving in small range
+
+---
+
+⚙️ SIGNAL ENGINE (SMART SCORING)
+
+🟢 BUY SCORE
+
+- EMA20 > EMA50 → +30
+- Price above EMA20 → +20
+- MACD bullish crossover → +20
+- RSI between 50–65 → +15 (avoid overbought)
+- ATR rising → +15
+
+🔴 SELL SCORE
+
+- EMA20 < EMA50 → +30
+- Price below EMA20 → +20
+- MACD bearish crossover → +20
+- RSI between 35–50 → +15
+- ATR rising → +15
+
+---
+
+🎯 SIGNAL DECISION
+
+- BUY if score ≥ 65
+- SELL if score ≥ 65
+- Else HOLD
+
+---
+
+🔁 SIDEWAYS MARKET LOGIC (VERY IMPORTANT FOR GOLD)
+
+- RSI < 30 → BUY (bounce)
+- RSI > 70 → SELL (reversal)
+- TP small (quick scalp)
+
+---
+
+⚡ ENTRY CONFIRMATION (CRITICAL FOR GOLD)
+
+- BUY:
+  - Bullish candle close
+  - Break of previous high
+- SELL:
+  - Bearish candle close
+  - Break of previous low
+
+---
+
+🛑 RISK MANAGEMENT (GOLD SPECIFIC)
+
+- Stop Loss:
+  - 3 to 5 points (0.3–0.5%)
+- Take Profit:
+  - 5 to 10 points
+- Risk:Reward = 1:1.5 minimum
+
+---
+
+📉 VOLATILITY FILTER
+
+- If ATR too low → HOLD
+- If ATR extremely high (news spike) → avoid trade
+
+---
+
+🤖 SMART PRICE ACTION LAYER
+
+- Detect:
+  - Higher Highs + Higher Lows → bullish bias
+  - Lower Highs + Lower Lows → bearish bias
+- Add +10 score boost if trend confirmed
+
+---
+
+🕰️ TIME FILTER (VERY IMPORTANT FOR GOLD)
+
+Only allow signals during:
+
+- London Session
+- New York Session
+
+Avoid:
+
+- Asian session (low movement)
+
+---
+
+🖥️ FRONTEND UI
+
+- Live XAUUSD price
+- BIG SIGNAL: BUY / SELL / HOLD
+- Confidence %
+- Entry, SL, TP
+- Trend status (TRENDING / SIDEWAYS)
+
+Color:
+
+- Green = BUY
+- Red = SELL
+- Yellow = HOLD
+
+---
+
+📜 SIGNAL HISTORY
+
+- Store last 20 signals
+- Show timestamp + result
+
+---
+
+🔔 ALERT SYSTEM
+
+- Sound + popup on signal
+
+---
+
+⚡ PERFORMANCE
+
+- Real-time updates (<1 sec delay)
+- No lag UI
+
+---
+
+🔒 EXTRA RULES
+
+- No duplicate signals
+- Minimum 2-minute gap between trades
+- Avoid signals during sudden spikes
+
+---
+
+🎯 FINAL OUTPUT
+
+- Fully working XAUUSD scalping signal web app
+- Accurate, fast, and stable signals
+- Designed specifically for gold trading behavior
+
+Make sure the app is bug-free, responsive, and optimized for real-time trading decisions.

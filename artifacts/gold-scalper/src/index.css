@@ -1,0 +1,183 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-popover-border: hsl(var(--popover-border));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-primary-border: hsl(var(--primary-border));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-secondary-border: hsl(var(--secondary-border));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-muted-border: hsl(var(--muted-border));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-accent-border: hsl(var(--accent-border));
+
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-destructive-border: hsl(var(--destructive-border));
+
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* FORCED DARK TRADING THEME */
+:root {
+  --button-outline: rgba(255,255,255, .10);
+  --badge-outline: rgba(255,255,255, .15);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(255,255,255, .04);
+  --elevate-2: rgba(255,255,255, .09);
+
+  /* Deep space/trading terminal background */
+  --background: 224 20% 4%;
+  --foreground: 210 40% 98%;
+  
+  /* Subtle borders */
+  --border: 215 14% 15%;
+  --input: 215 14% 15%;
+  --ring: 216 34% 50%;
+
+  /* Cards are slightly lighter than bg */
+  --card: 224 20% 6%;
+  --card-foreground: 210 40% 98%;
+  --card-border: 215 14% 12%;
+
+  --popover: 224 20% 6%;
+  --popover-foreground: 210 40% 98%;
+  --popover-border: 215 14% 15%;
+
+  /* Primary action color (subtle blue/indigo) */
+  --primary: 216 34% 50%;
+  --primary-foreground: 210 40% 98%;
+  --primary-border: 216 34% 45%;
+
+  /* Secondary */
+  --secondary: 215 14% 12%;
+  --secondary-foreground: 210 40% 98%;
+  --secondary-border: 215 14% 16%;
+
+  /* Muted */
+  --muted: 215 14% 10%;
+  --muted-foreground: 215 20% 65%;
+  --muted-border: 215 14% 14%;
+
+  /* Accent (Gold/Yellow for XAUUSD) */
+  --accent: 45 93% 47%;
+  --accent-foreground: 224 20% 4%;
+  --accent-border: 45 93% 40%;
+
+  /* Trading Colors */
+  --success: 142 71% 45%; /* Bullish/Buy Green */
+  --success-foreground: 144 100% 98%;
+  
+  --warning: 38 92% 50%; /* Neutral/Hold Yellow */
+  --warning-foreground: 48 100% 96%;
+
+  --destructive: 348 83% 47%; /* Bearish/Sell Red */
+  --destructive-foreground: 355 100% 97%;
+  --destructive-border: 348 83% 40%;
+
+  --radius: 0.5rem;
+
+  --shadow-2xs: 0px 2px 0px 0px rgba(0,0,0,0.5);
+  --shadow-xs: 0px 2px 0px 0px rgba(0,0,0,0.5);
+  --shadow-sm: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 1px 2px -1px rgba(0,0,0,0.3);
+  --shadow: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 1px 2px -1px rgba(0,0,0,0.3);
+  --shadow-md: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 2px 4px -1px rgba(0,0,0,0.3);
+  --shadow-lg: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 4px 6px -1px rgba(0,0,0,0.3);
+  --shadow-xl: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 8px 10px -1px rgba(0,0,0,0.3);
+  --shadow-2xl: 0px 2px 0px 0px rgba(0,0,0,0.5);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  html {
+    @apply bg-background text-foreground antialiased selection:bg-primary/30 selection:text-primary-foreground;
+    color-scheme: dark;
+  }
+  
+  body {
+    /* Custom grid pattern for the trading dashboard vibe */
+    background-image: linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px),
+                      linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+    background-attachment: fixed;
+  }
+
+  /* Utility to make numbers tabular and monospaced */
+  .font-numbers {
+    @apply font-mono tracking-tight;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Scrollbar styling for a cleaner look */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-background;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/40 transition-colors;
+}
+
+@layer utilities {
+  .hover-elevate {
+    position: relative;
+    z-index: 0;
+  }
+  .hover-elevate::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    border-radius: inherit;
+    z-index: 999;
+    transition: background-color 0.2s ease;
+  }
+  .hover-elevate:hover::after {
+    background-color: var(--elevate-1);
+  }
+  .active-elevate-2:active::after {
+    background-color: var(--elevate-2);
+  }
+}

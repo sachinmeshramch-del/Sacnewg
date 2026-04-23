@@ -1,0 +1,13 @@
+packages:
+  "date-fns": "For formatting timestamps"
+  "framer-motion": "For dashboard animations and layout transitions"
+  "lucide-react": "For professional trading terminal icons"
+  "clsx": "For conditional class names"
+  "tailwind-merge": "For merging tailwind classes"
+
+images: []
+
+notes:
+  - "The app relies on @workspace/api-client-react for generated TanStack Query hooks."
+  - "The entire application is forced into a dark 'trading terminal' theme."
+  - "XAUUSD is the primary asset."
