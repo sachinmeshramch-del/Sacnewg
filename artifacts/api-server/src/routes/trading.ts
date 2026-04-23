@@ -20,7 +20,7 @@ router.get("/signal", async (req, res) => {
     const timeframe = (req.query.timeframe as string) || "5m";
     const signal = await getSignal(timeframe);
 
-    if (signal.signal !== "HOLD") {
+    if (signal.signal !== "HOLD" && signal.signalStatus === "CONFIRMED") {
       sendTelegramAlert(
         signal.signal as "BUY" | "SELL",
         signal.entry,

@@ -330,6 +330,14 @@ components:
         signalLabel:
           type: string
           description: Human-readable label for the signal type (e.g. TREND FOLLOWING SELL, REVERSAL BUY)
+        signalStatus:
+          type: string
+          enum: [PENDING, CONFIRMED]
+          description: PENDING means awaiting 2-candle confirmation; CONFIRMED is a tradable signal.
+        signalType:
+          type: string
+          enum: [TREND, REVERSAL]
+          description: TREND = trend-following (HIGH priority); REVERSAL = counter-trend (LOW priority).
         timeframe:
           type: string
         indicators:

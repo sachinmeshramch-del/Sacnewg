@@ -39,6 +39,8 @@ interface SignalResult {
   trend: "BULLISH" | "BEARISH" | "NEUTRAL";
   marketMode: "TRENDING" | "SIDEWAYS";
   signalLabel?: string;
+  signalStatus?: "PENDING" | "CONFIRMED";
+  signalType?: "TREND" | "REVERSAL";
   timeframe: string;
   indicators: Indicators;
   timestamp: string;
@@ -96,6 +98,18 @@ const lastSignalMemory: Record<string, SignalMemory | null> = {
   "5m": null,
 };
 
+interface PendingSignal {
+  signal: "BUY" | "SELL";
+  firstCandleTs: number;
+  lastCandleTs: number;
+  candleCount: number;
+}
+
+const pendingSignal: Record<string, PendingSignal | null> = {
+  "1m": null,
+  "5m": null,
+};
+
 interface PrevState {
   rsi: number;
   macdHistogram: number;
@@ -107,10 +121,13 @@ const prevState: Record<string, PrevState | null> = {
   "5m": null,
 };
 
-// 2-minute cooldown between same-direction signals
-const COOLDOWN_MS = 2 * 60 * 1000;
-// 0.3% price move to re-enable same direction
-const MIN_PRICE_MOVE_PCT = 0.003;
+// 3-minute cooldown after any confirmed signal
+const COOLDOWN_MS = 3 * 60 * 1000;
+// Confidence thresholds
+const MIN_CONFIDENCE_TREND = 65;     // trend-following minimum
+const MIN_CONFIDENCE_REVERSAL = 75;  // counter-trend / reversal minimum
+// Bars of confirmation required before tradable
+const CONFIRMATION_CANDLES = 2;
 
 // ── Data Fetching ──────────────────────────────────────────────────────────────
 async function fetchYahooFinance(symbol: string, interval: string, range: string): Promise<OHLCData | null> {
@@ -394,45 +411,24 @@ function generateSignal(
   // Primary: RSI extremes (high confidence reversal)
   // Secondary: MACD cross (lower confidence momentum signal)
   if (marketMode === "SIDEWAYS") {
+    // SIDEWAYS = noisy market. Only allow RSI extreme scalps. No MACD-only entries.
     const macdBearish = macdLine < macdSignal || macdHistogram < 0;
     const macdBullish = macdLine > macdSignal || macdHistogram > 0;
-    const macdBearCross = macdHistogram < 0 && prevMacdHistogram >= 0;
-    const macdBullCross = macdHistogram > 0 && prevMacdHistogram <= 0;
 
-    // RSI oversold — strong reversal BUY
-    if (rsi < 35) {
-      let conf = Math.min(84, 55 + Math.round((35 - rsi) * 2));
+    // RSI oversold — RSI-based reversal BUY
+    if (rsi < 30) {
+      let conf = Math.min(84, 60 + Math.round((30 - rsi) * 2));
       if (lastCandleBullish) conf += 6;
-      if (macdBullish)       conf += 5;
-      return makeBuy(currentPrice, atr, conf, marketMode, timeframe, indicators, "SIDEWAYS BUY");
+      if (macdBullish)       conf += 4;
+      return makeBuy(currentPrice, atr, conf, marketMode, timeframe, indicators, "SIDEWAYS RSI BUY");
     }
 
-    // RSI overbought — strong reversal SELL
-    if (rsi > 65) {
-      let conf = Math.min(84, 55 + Math.round((rsi - 65) * 2));
+    // RSI overbought — RSI-based reversal SELL
+    if (rsi > 70) {
+      let conf = Math.min(84, 60 + Math.round((rsi - 70) * 2));
       if (!lastCandleBullish) conf += 6;
-      if (macdBearish)        conf += 5;
-      return makeSell(currentPrice, atr, conf, marketMode, timeframe, indicators, "SIDEWAYS SELL");
-    }
-
-    // Fresh MACD cross — higher confidence
-    if (macdBullCross && rsi < 55) {
-      const conf = 65 + (lastCandleBullish ? 8 : 0);
-      return makeBuy(currentPrice, atr, conf, marketMode, timeframe, indicators, "MACD CROSS BUY");
-    }
-    if (macdBearCross && rsi > 45) {
-      const conf = 65 + (!lastCandleBullish ? 8 : 0);
-      return makeSell(currentPrice, atr, conf, marketMode, timeframe, indicators, "MACD CROSS SELL");
-    }
-
-    // MACD already aligned — moderate confidence directional signal
-    if (macdBullish && rsi < 50) {
-      const conf = 60 + (lastCandleBullish ? 5 : 0);
-      return makeBuy(currentPrice, atr, conf, marketMode, timeframe, indicators, "MACD BULL SIGNAL");
-    }
-    if (macdBearish && rsi > 50) {
-      const conf = 60 + (!lastCandleBullish ? 5 : 0);
-      return makeSell(currentPrice, atr, conf, marketMode, timeframe, indicators, "MACD BEAR SIGNAL");
+      if (macdBearish)        conf += 4;
+      return makeSell(currentPrice, atr, conf, marketMode, timeframe, indicators, "SIDEWAYS RSI SELL");
     }
 
     return makeHold(currentPrice, atr, "NEUTRAL", marketMode, timeframe, indicators, 28);
@@ -521,31 +517,96 @@ function generateSignal(
   return makeHold(currentPrice, atr, "NEUTRAL", marketMode, timeframe, indicators, 20);
 }
 
-// ── Cooldown ───────────────────────────────────────────────────────────────────
-function applyCooldown(
-  result: Omit<SignalResult, "timestamp">,
+// ── Signal Type Classification ─────────────────────────────────────────────────
+function classifySignalType(label?: string): "TREND" | "REVERSAL" {
+  if (!label) return "TREND";
+  if (label.includes("REVERSAL") || label.includes("SIDEWAYS")) return "REVERSAL";
+  return "TREND";
+}
+
+// ── Reversal Strength Validation ───────────────────────────────────────────────
+// When flipping direction vs the last confirmed signal, require all three:
+//   • RSI extreme  (< 30 for BUY reversal,  > 70 for SELL reversal)
+//   • Fresh MACD crossover in the new direction
+//   • Candle confirmation in the new direction
+function isStrongReversal(
+  newSignal: "BUY" | "SELL",
+  ind: ExtendedIndicators
+): boolean {
+  const macdBullCross = ind.macdHistogram > 0 && ind.prevMacdHistogram <= 0;
+  const macdBearCross = ind.macdHistogram < 0 && ind.prevMacdHistogram >= 0;
+  if (newSignal === "BUY") {
+    return ind.rsi < 30 && macdBullCross && ind.lastCandleBullish;
+  }
+  return ind.rsi > 70 && macdBearCross && !ind.lastCandleBullish;
+}
+
+// ── Full Filter Pipeline ───────────────────────────────────────────────────────
+// Order: confidence → priority → cooldown → reversal lock → 2-candle confirmation
+function applyFilters(
+  raw: Omit<SignalResult, "timestamp">,
   timeframe: string,
-  currentPrice: number
+  currentPrice: number,
+  lastCandleTs: number,
+  indicators: ExtendedIndicators,
 ): Omit<SignalResult, "timestamp"> {
-  const memory = lastSignalMemory[timeframe];
-  if (!memory || result.signal === "HOLD") return result;
-
-  if (result.signal !== memory.signal) {
-    // Opposite direction — always allowed
-    return result;
+  // HOLD passes straight through; clear any pending state
+  if (raw.signal === "HOLD") {
+    pendingSignal[timeframe] = null;
+    return { ...raw, signalStatus: undefined, signalType: undefined };
   }
 
-  const now     = Date.now();
-  const elapsed = now - memory.timestamp;
-  const moved   = Math.abs(currentPrice - memory.price) / memory.price;
+  const signalType = classifySignalType(raw.signalLabel);
 
-  if (elapsed >= COOLDOWN_MS || moved >= MIN_PRICE_MOVE_PCT) {
-    // Cooldown done or price moved enough — allow with small confidence penalty
-    return { ...result, confidence: Math.max(40, result.confidence - 5) };
+  // ── 1. Confidence threshold (HARD floor) ─────────────────────────────────
+  const minConf = signalType === "REVERSAL" ? MIN_CONFIDENCE_REVERSAL : MIN_CONFIDENCE_TREND;
+  if (raw.confidence < minConf) {
+    pendingSignal[timeframe] = null;
+    return makeHoldFromResult(raw, Math.min(45, raw.confidence));
   }
 
-  // Duplicate signal within cooldown → suppress
-  return makeHoldFromResult(result, 28);
+  // ── 2. Cooldown — block any new signal within 3 mins of last confirmed ──
+  const lastConfirmed = lastSignalMemory[timeframe];
+  if (lastConfirmed && Date.now() - lastConfirmed.timestamp < COOLDOWN_MS) {
+    pendingSignal[timeframe] = null;
+    return makeHoldFromResult(raw, 30);
+  }
+
+  // ── 3. Reversal lock — flipping direction needs strong reversal proof ───
+  if (lastConfirmed && raw.signal !== lastConfirmed.signal) {
+    if (!isStrongReversal(raw.signal as "BUY" | "SELL", indicators)) {
+      pendingSignal[timeframe] = null;
+      return makeHoldFromResult(raw, 32);
+    }
+  }
+
+  // ── 4. 2-candle confirmation persistence ────────────────────────────────
+  const pending = pendingSignal[timeframe];
+  if (!pending || pending.signal !== raw.signal) {
+    // Start a new pending signal — needs to persist for CONFIRMATION_CANDLES
+    pendingSignal[timeframe] = {
+      signal: raw.signal as "BUY" | "SELL",
+      firstCandleTs: lastCandleTs,
+      lastCandleTs,
+      candleCount: 1,
+    };
+    return { ...raw, signalStatus: "PENDING", signalType };
+  }
+
+  // Same direction pending — increment count when candle ts advances
+  if (lastCandleTs > pending.lastCandleTs) {
+    pending.lastCandleTs = lastCandleTs;
+    pending.candleCount += 1;
+  }
+
+  if (pending.candleCount >= CONFIRMATION_CANDLES) {
+    // CONFIRMED — clear pending, will be recorded as last confirmed by caller
+    pendingSignal[timeframe] = null;
+    return { ...raw, signalStatus: "CONFIRMED", signalType };
+  }
+
+  // Still waiting for the next candle to lock it in
+  return { ...raw, signalStatus: "PENDING", signalType };
 }
 
 function makeHoldFromResult(result: Omit<SignalResult, "timestamp">, confidence: number): Omit<SignalResult, "timestamp"> {
@@ -553,6 +614,8 @@ function makeHoldFromResult(result: Omit<SignalResult, "timestamp">, confidence:
     ...result,
     signal: "HOLD",
     confidence,
+    signalStatus: undefined,
+    signalType: undefined,
   };
 }
 
@@ -681,19 +744,26 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     atr: indicators.atr,
   };
 
-  const rawResult    = generateSignal(indicators, currentPrice, timeframe);
-  const cooledResult = applyCooldown(rawResult, tfKey, currentPrice);
+  // Latest candle timestamp drives the 2-candle confirmation logic.
+  // Falls back to the current minute bucket when synthetic indicators are used.
+  const lastCandleTs =
+    ohlc?.timestamps?.[ohlc.timestamps.length - 1] ??
+    Math.floor(Date.now() / (is1m ? 60_000 : 300_000));
 
-  if (cooledResult.signal !== "HOLD") {
+  const rawResult     = generateSignal(indicators, currentPrice, timeframe);
+  const filteredResult = applyFilters(rawResult, tfKey, currentPrice, lastCandleTs, indicators);
+
+  // Record a confirmed signal — starts the 3-min cooldown
+  if (filteredResult.signal !== "HOLD" && filteredResult.signalStatus === "CONFIRMED") {
     lastSignalMemory[tfKey] = {
-      signal: cooledResult.signal as "BUY" | "SELL",
+      signal: filteredResult.signal as "BUY" | "SELL",
       price: currentPrice,
       timestamp: Date.now(),
     };
   }
 
   const result: SignalResult = {
-    ...cooledResult,
+    ...filteredResult,
     timestamp: new Date().toISOString(),
   };
 
@@ -706,7 +776,8 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     signal5mExpiry  = Date.now() + signalTtl;
   }
 
-  if (result.signal !== "HOLD") {
+  // Only confirmed (tradable) signals enter history — pending ones don't
+  if (result.signal !== "HOLD" && result.signalStatus === "CONFIRMED") {
     addToHistory(result);
   }
 

@@ -39,9 +39,10 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
   const { data, isLoading, isError, isFetching } = useCurrentSignal(timeframe);
   const lastSignalRef = useRef<string | null>(null);
 
-  // Sound + browser notification on new BUY/SELL signal
+  // Sound + browser notification ONLY on confirmed (tradable) BUY/SELL signal
   useEffect(() => {
     if (!data || data.signal === "HOLD") return;
+    if (data.signalStatus !== "CONFIRMED") return;
     const key = `${data.signal}-${data.timestamp}`;
     if (key === lastSignalRef.current) return;
     lastSignalRef.current = key;
@@ -49,7 +50,7 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
 
     // Browser notification if permitted
     if (Notification.permission === "granted") {
-      new Notification(`🔔 XAUUSD ${data.signal} Signal`, {
+      new Notification(`🔔 XAUUSD ${data.signal} Signal Confirmed`, {
         body: `Entry $${data.entry} | SL $${data.stopLoss} | TP $${data.takeProfit} | ${data.confidence}% confidence`,
         icon: "/favicon.ico",
       });
@@ -141,29 +142,51 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
 
             {/* Main Signal Badge */}
             <div className="flex flex-col items-center justify-center p-6 rounded-2xl bg-secondary/50 border border-white/5">
-              <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3">Action Required</span>
-              <div className={cn("px-8 py-3 rounded-xl font-black text-3xl tracking-widest border", getSignalColors(data.signal))}>
+              <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3">
+                {data.signalStatus === "PENDING" ? "Awaiting Confirmation" : "Action Required"}
+              </span>
+              <div className={cn(
+                "px-8 py-3 rounded-xl font-black text-3xl tracking-widest border",
+                getSignalColors(data.signal),
+                data.signalStatus === "PENDING" && data.signal !== "HOLD" && "opacity-70 ring-2 ring-warning/40 animate-pulse"
+              )}>
                 {data.signal}
               </div>
 
-              {/* Signal Label Badge */}
-              {data.signalLabel && data.signal !== "HOLD" && (
-                <div className="mt-3 flex items-center gap-1.5">
-                  <span className={cn(
-                    "px-3 py-1 rounded-full text-[10px] font-bold tracking-widest border",
-                    data.signalLabel.includes("REVERSAL")
-                      ? "text-warning border-warning/30 bg-warning/10"
-                      : data.signalLabel.includes("PULLBACK")
-                        ? "text-blue-400 border-blue-400/30 bg-blue-400/10"
-                        : data.signal === "SELL"
-                          ? "text-destructive border-destructive/30 bg-destructive/10"
-                          : "text-success border-success/30 bg-success/10"
-                  )}>
-                    {data.signalLabel}
-                  </span>
-                  {data.signalLabel.includes("REVERSAL") && (
-                    <span className="text-[9px] text-warning/70">counter-trend</span>
+              {/* Status + Type badges */}
+              {data.signal !== "HOLD" && (data.signalStatus || data.signalType) && (
+                <div className="mt-3 flex items-center gap-2 flex-wrap justify-center">
+                  {data.signalStatus && (
+                    <span className={cn(
+                      "px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest border inline-flex items-center gap-1",
+                      data.signalStatus === "CONFIRMED"
+                        ? "text-success border-success/40 bg-success/10"
+                        : "text-warning border-warning/40 bg-warning/10"
+                    )}>
+                      <span className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        data.signalStatus === "CONFIRMED" ? "bg-success" : "bg-warning animate-pulse"
+                      )} />
+                      {data.signalStatus}
+                    </span>
                   )}
+                  {data.signalType && (
+                    <span className={cn(
+                      "px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest border",
+                      data.signalType === "TREND"
+                        ? "text-primary border-primary/30 bg-primary/10"
+                        : "text-warning border-warning/30 bg-warning/10"
+                    )}>
+                      {data.signalType === "TREND" ? "TREND TRADE" : "REVERSAL TRADE"}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Signal Label */}
+              {data.signalLabel && data.signal !== "HOLD" && (
+                <div className="mt-2 text-[10px] text-muted-foreground tracking-wide">
+                  {data.signalLabel}
                 </div>
               )}
 

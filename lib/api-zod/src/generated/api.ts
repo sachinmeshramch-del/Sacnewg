@@ -49,6 +49,18 @@ export const GetSignalResponse = zod.object({
     .describe(
       "Human-readable label for the signal type (e.g. TREND FOLLOWING SELL, REVERSAL BUY)",
     ),
+  signalStatus: zod
+    .enum(["PENDING", "CONFIRMED"])
+    .optional()
+    .describe(
+      "PENDING means awaiting 2-candle confirmation; CONFIRMED is a tradable signal.",
+    ),
+  signalType: zod
+    .enum(["TREND", "REVERSAL"])
+    .optional()
+    .describe(
+      "TREND = trend-following (HIGH priority); REVERSAL = counter-trend (LOW priority).",
+    ),
   timeframe: zod.string(),
   indicators: zod.object({
     rsi: zod.number(),

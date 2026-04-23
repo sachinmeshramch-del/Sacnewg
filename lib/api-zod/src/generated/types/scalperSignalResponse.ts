@@ -8,6 +8,8 @@
 import type { ScalperIndicators } from "./scalperIndicators";
 import type { ScalperSignalResponseMarketMode } from "./scalperSignalResponseMarketMode";
 import type { ScalperSignalResponseSignal } from "./scalperSignalResponseSignal";
+import type { ScalperSignalResponseSignalStatus } from "./scalperSignalResponseSignalStatus";
+import type { ScalperSignalResponseSignalType } from "./scalperSignalResponseSignalType";
 import type { ScalperSignalResponseTrend } from "./scalperSignalResponseTrend";
 
 export interface ScalperSignalResponse {
@@ -20,6 +22,10 @@ export interface ScalperSignalResponse {
   marketMode: ScalperSignalResponseMarketMode;
   /** Human-readable label for the signal type (e.g. TREND FOLLOWING SELL, REVERSAL BUY) */
   signalLabel?: string;
+  /** PENDING means awaiting 2-candle confirmation; CONFIRMED is a tradable signal. */
+  signalStatus?: ScalperSignalResponseSignalStatus;
+  /** TREND = trend-following (HIGH priority); REVERSAL = counter-trend (LOW priority). */
+  signalType?: ScalperSignalResponseSignalType;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: Date;

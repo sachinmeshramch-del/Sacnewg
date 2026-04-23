@@ -54,6 +54,28 @@ export const ScalperSignalResponseMarketMode = {
   SIDEWAYS: "SIDEWAYS",
 } as const;
 
+/**
+ * PENDING means awaiting 2-candle confirmation; CONFIRMED is a tradable signal.
+ */
+export type ScalperSignalResponseSignalStatus =
+  (typeof ScalperSignalResponseSignalStatus)[keyof typeof ScalperSignalResponseSignalStatus];
+
+export const ScalperSignalResponseSignalStatus = {
+  PENDING: "PENDING",
+  CONFIRMED: "CONFIRMED",
+} as const;
+
+/**
+ * TREND = trend-following (HIGH priority); REVERSAL = counter-trend (LOW priority).
+ */
+export type ScalperSignalResponseSignalType =
+  (typeof ScalperSignalResponseSignalType)[keyof typeof ScalperSignalResponseSignalType];
+
+export const ScalperSignalResponseSignalType = {
+  TREND: "TREND",
+  REVERSAL: "REVERSAL",
+} as const;
+
 export interface ScalperSignalResponse {
   signal: ScalperSignalResponseSignal;
   confidence: number;
@@ -64,6 +86,10 @@ export interface ScalperSignalResponse {
   marketMode: ScalperSignalResponseMarketMode;
   /** Human-readable label for the signal type (e.g. TREND FOLLOWING SELL, REVERSAL BUY) */
   signalLabel?: string;
+  /** PENDING means awaiting 2-candle confirmation; CONFIRMED is a tradable signal. */
+  signalStatus?: ScalperSignalResponseSignalStatus;
+  /** TREND = trend-following (HIGH priority); REVERSAL = counter-trend (LOW priority). */
+  signalType?: ScalperSignalResponseSignalType;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: string;

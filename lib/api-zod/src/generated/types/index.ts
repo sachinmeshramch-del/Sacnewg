@@ -48,6 +48,8 @@ export * from "./scalperIndicators";
 export * from "./scalperSignalResponse";
 export * from "./scalperSignalResponseMarketMode";
 export * from "./scalperSignalResponseSignal";
+export * from "./scalperSignalResponseSignalStatus";
+export * from "./scalperSignalResponseSignalType";
 export * from "./scalperSignalResponseTrend";
 export * from "./smcConfidenceBreakdown";
 export * from "./smcHistoryItem";
