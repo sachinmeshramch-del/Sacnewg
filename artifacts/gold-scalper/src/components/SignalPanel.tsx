@@ -48,19 +48,38 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
     lastSignalRef.current = key;
     playSignalSound(data.signal as "BUY" | "SELL");
 
-    // Browser notification if permitted
-    if (Notification.permission === "granted") {
-      new Notification(`🔔 XAUUSD ${data.signal} Signal Confirmed`, {
+    // Browser notification if permitted. Mobile Chrome forbids `new Notification()`
+    // and requires the ServiceWorkerRegistration path — try SW first, then fall
+    // back to the constructor on desktop, and silently ignore if neither works.
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+      const title = `🔔 XAUUSD ${data.signal} Signal Confirmed`;
+      const options: NotificationOptions = {
         body: `Entry $${data.entry} | SL $${data.stopLoss} | TP $${data.takeProfit} | ${data.confidence}% confidence`,
         icon: "/favicon.ico",
-      });
+      };
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistration()
+          .then(reg => {
+            if (reg) {
+              reg.showNotification(title, options).catch(() => {});
+            } else {
+              try { new Notification(title, options); } catch { /* mobile blocks ctor */ }
+            }
+          })
+          .catch(() => {
+            try { new Notification(title, options); } catch { /* ignore */ }
+          });
+      } else {
+        try { new Notification(title, options); } catch { /* ignore */ }
+      }
     }
   }, [data]);
 
-  // Request notification permission once on mount
+  // Request notification permission once on mount (skip on browsers without API)
   useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
     if (Notification.permission === "default") {
-      Notification.requestPermission();
+      Notification.requestPermission().catch(() => {});
     }
   }, []);
 
