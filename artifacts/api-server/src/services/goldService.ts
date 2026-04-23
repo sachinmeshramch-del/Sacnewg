@@ -257,6 +257,12 @@ function getPriceActionBias(highs: number[], lows: number[], n = 5): "BULLISH" |
 }
 
 // ── Extended Indicators ────────────────────────────────────────────────────────
+type TrapKind =
+  | "FAKE_BREAKOUT_SELL"   // Bull trap: broke resistance, closed back below + upper wick
+  | "FAKE_BREAKDOWN_BUY"   // Bear trap: broke support, closed back above + lower wick
+  | "STOP_HUNT_SELL"       // Liquidity grab above highs, sharp bearish rejection
+  | "STOP_HUNT_BUY";       // Liquidity grab below lows, sharp bullish rejection
+
 interface ExtendedIndicators extends Indicators {
   prevMacdHistogram: number;
   prevAtr: number;
@@ -264,6 +270,53 @@ interface ExtendedIndicators extends Indicators {
   lastCandleBullish: boolean;
   breaksPrevHigh: boolean;
   breaksPrevLow: boolean;
+  // Price-action structure for trap detection
+  resistance: number;          // highest high of prior N candles (excluding current)
+  support: number;             // lowest low of prior N candles  (excluding current)
+  upperWick: number;
+  lowerWick: number;
+  body: number;                // |open - close|
+  wickRatio: number;           // max(upper, lower) / max(body, ε)
+  trap: TrapKind | null;
+}
+
+const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
+const MIN_WICK_TO_BODY   = 1.5;          // wick must be 1.5x the body to qualify
+const MIN_BODY_PCT       = 0.0003;       // body at least 0.03% of price (skip dojis)
+
+function detectTrap(
+  open: number, high: number, low: number, close: number,
+  resistance: number, support: number,
+  atr: number, price: number,
+): TrapKind | null {
+  const body      = Math.abs(open - close);
+  const upperWick = high - Math.max(open, close);
+  const lowerWick = Math.min(open, close) - low;
+
+  // Filter: skip dojis / candles too small to be meaningful
+  if (body < price * MIN_BODY_PCT) return null;
+  // Filter: skip if ATR too low (chop) — handled by caller, but be safe
+  if (atr <= 0) return null;
+
+  // ── Bull trap / fake breakout SELL ──
+  // High pierced resistance, close came back below, big upper wick
+  if (high > resistance && close < resistance && upperWick > body * MIN_WICK_TO_BODY) {
+    return "FAKE_BREAKOUT_SELL";
+  }
+  // ── Bear trap / fake breakdown BUY ──
+  if (low < support && close > support && lowerWick > body * MIN_WICK_TO_BODY) {
+    return "FAKE_BREAKDOWN_BUY";
+  }
+  // ── Stop hunt SELL — liquidity grab above prior high w/ strong bearish close ──
+  // Spike above resistance, bearish body, very long upper wick relative to body
+  if (high > resistance && close < open && upperWick > body * 2 && upperWick > atr * 0.5) {
+    return "STOP_HUNT_SELL";
+  }
+  // ── Stop hunt BUY — liquidity grab below prior low w/ strong bullish close ──
+  if (low < support && close > open && lowerWick > body * 2 && lowerWick > atr * 0.5) {
+    return "STOP_HUNT_BUY";
+  }
+  return null;
 }
 
 function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicators {
@@ -302,17 +355,34 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
   const last = closes.length - 1;
   const lastClose      = closes[last];
   const lastOpen       = opens[last];
+  const lastHigh       = highs[last];
+  const lastLow        = lows[last];
   const prevHigh       = highs[last - 1] ?? highs[last];
   const prevLow        = lows[last - 1]  ?? lows[last];
   const lastCandleBullish = lastClose > lastOpen;
   const breaksPrevHigh    = lastClose > prevHigh;
   const breaksPrevLow     = lastClose < prevLow;
 
+  // ── Structure: swing high/low EXCLUDING the current (developing) candle ──
+  const lookbackStart = Math.max(0, last - STRUCTURE_LOOKBACK);
+  const lookbackHighs = highs.slice(lookbackStart, last);
+  const lookbackLows  = lows.slice(lookbackStart, last).filter(l => l > 0);
+  const resistance = lookbackHighs.length ? Math.max(...lookbackHighs) : lastHigh;
+  const support    = lookbackLows.length  ? Math.min(...lookbackLows)  : lastLow;
+
+  const body      = Math.abs(lastOpen - lastClose);
+  const upperWick = lastHigh - Math.max(lastOpen, lastClose);
+  const lowerWick = Math.min(lastOpen, lastClose) - lastLow;
+  const wickRatio = Math.max(upperWick, lowerWick) / Math.max(body, 1e-6);
+
+  const trap = detectTrap(lastOpen, lastHigh, lastLow, lastClose, resistance, support, atr, lastClose);
+
   return {
     rsi, ema20, ema50,
     macdLine, macdSignal, macdHistogram,
     atr, prevMacdHistogram, prevAtr,
     priceActionBias, lastCandleBullish, breaksPrevHigh, breaksPrevLow,
+    resistance, support, upperWick, lowerWick, body, wickRatio, trap,
   };
 }
 
@@ -391,6 +461,7 @@ function generateSignal(
     rsi, ema20, ema50, macdLine, macdSignal, macdHistogram,
     atr, prevMacdHistogram, prevAtr,
     priceActionBias, lastCandleBullish, breaksPrevHigh, breaksPrevLow,
+    trap,
   } = indicators;
 
   // ── 1. ATR Volatility Filter ─────────────────────────────────────────────
@@ -407,6 +478,30 @@ function generateSignal(
   // ── 2. Market Mode Detection ─────────────────────────────────────────────
   const emaSeparationPct = Math.abs(ema20 - ema50) / currentPrice;
   const marketMode: "TRENDING" | "SIDEWAYS" = emaSeparationPct < 0.0008 ? "SIDEWAYS" : "TRENDING";
+
+  // ── 2.5 TRAP / STOP HUNT (HIGHEST PRIORITY) ──────────────────────────────
+  // Liquidity grabs and fake breakouts override normal indicator logic — they
+  // catch the reversal AFTER smart money has hunted stops, which has the best
+  // risk/reward in scalping. The 2-candle confirmation in applyFilters still
+  // gates the trade, so a single noisy wick won't fire.
+  if (trap) {
+    const isSell = trap === "FAKE_BREAKOUT_SELL" || trap === "STOP_HUNT_SELL";
+    const isBull  = ema20 > ema50;
+    const isBear  = ema20 < ema50;
+    const trendAligned = (isSell && isBear) || (!isSell && isBull);
+    let conf = 65 + 25;                       // base + trap boost
+    if (trendAligned)            conf += 10; // align bonus → +35 total
+    if (indicators.wickRatio > 2.5) conf += 3;
+    if (atrRising)               conf += 2;
+    const label =
+      trap === "FAKE_BREAKOUT_SELL" ? "FAKE BREAKOUT SELL" :
+      trap === "FAKE_BREAKDOWN_BUY" ? "FAKE BREAKDOWN BUY" :
+      trap === "STOP_HUNT_SELL"     ? "STOP HUNT SELL"     :
+                                       "STOP HUNT BUY";
+    return isSell
+      ? makeSell(currentPrice, atr, conf, marketMode, timeframe, indicators, label)
+      : makeBuy(currentPrice,  atr, conf, marketMode, timeframe, indicators, label);
+  }
 
   // ── 4. SIDEWAYS Logic ────────────────────────────────────────────────────
   // Primary: RSI extremes (high confidence reversal)
@@ -573,8 +668,16 @@ function applyFilters(
     return makeHoldFromResult(raw, 30);
   }
 
-  // ── 3. Reversal lock — flipping direction needs strong reversal proof ───
-  if (lastConfirmed && raw.signal !== lastConfirmed.signal) {
+  // ── 3. Reversal lock — flipping direction needs strong reversal proof.
+  //       Trap / stop-hunt signals are exempt: a fresh liquidity grab IS the
+  //       strongest reversal proof there is, and that's exactly what we want
+  //       to catch.
+  const isTrapSignal = !!raw.signalLabel && (
+    raw.signalLabel.includes("FAKE BREAKOUT") ||
+    raw.signalLabel.includes("FAKE BREAKDOWN") ||
+    raw.signalLabel.includes("STOP HUNT")
+  );
+  if (lastConfirmed && raw.signal !== lastConfirmed.signal && !isTrapSignal) {
     if (!isStrongReversal(raw.signal as "BUY" | "SELL", indicators)) {
       pendingSignal[timeframe] = null;
       return makeHoldFromResult(raw, 32);
@@ -762,6 +865,13 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       lastCandleBullish: Math.random() > 0.5,
       breaksPrevHigh: false,
       breaksPrevLow: false,
+      resistance: base + 5,
+      support: base - 5,
+      upperWick: 0,
+      lowerWick: 0,
+      body: 0,
+      wickRatio: 0,
+      trap: null,
     };
   }
 

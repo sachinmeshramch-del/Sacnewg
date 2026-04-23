@@ -172,6 +172,18 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 {data.signal}
               </div>
 
+              {/* Trap / Stop-Hunt banner — highest priority alert */}
+              {data.signal !== "HOLD" && data.signalLabel && (
+                data.signalLabel.includes("FAKE BREAKOUT") ||
+                data.signalLabel.includes("FAKE BREAKDOWN") ||
+                data.signalLabel.includes("STOP HUNT")
+              ) && (
+                <div className="mt-3 px-3 py-1.5 rounded-md border-2 border-amber-400/60 bg-amber-400/10 text-amber-200 text-[11px] font-black tracking-widest uppercase flex items-center gap-1.5 shadow-[0_0_18px_rgba(251,191,36,0.25)]">
+                  <span className="text-base leading-none">⚡</span>
+                  {data.signalLabel.includes("STOP HUNT") ? "STOP HUNT DETECTED" : "FAKE BREAKOUT DETECTED"}
+                </div>
+              )}
+
               {/* Status + Type badges */}
               {data.signal !== "HOLD" && (data.signalStatus || data.signalType) && (
                 <div className="mt-3 flex items-center gap-2 flex-wrap justify-center">
