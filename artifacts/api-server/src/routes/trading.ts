@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { getLivePrice, getSignal, getHistory } from "../services/goldService.js";
 import { getFinnhubPrice, isFinnhubConnected } from "../services/finnhubService.js";
+import { getSpotPrice } from "../services/spotGoldService.js";
 import { setTelegramConfig, getTelegramConfig, sendTelegramAlert } from "../services/telegramService.js";
 
 const router: IRouter = Router();
@@ -134,7 +135,17 @@ router.get("/tick", async (_req, res) => {
       });
       return;
     }
-    // Fall back to cached price data
+    // Try spot-price feed (gold-api / stooq) so the tick matches TradingView OANDA
+    const spot = await getSpotPrice();
+    if (spot) {
+      res.json({
+        price: parseFloat(spot.price.toFixed(2)),
+        source: spot.source,
+        timestamp: new Date(spot.timestamp).toISOString(),
+      });
+      return;
+    }
+    // Last resort: cached price data (may be Yahoo futures)
     const priceData = await getLivePrice();
     res.json({
       price: priceData.price,

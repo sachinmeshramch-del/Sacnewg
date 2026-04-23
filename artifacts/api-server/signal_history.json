@@ -1,6 +1,18 @@
 {
   "items": [
     {
+      "id": 32,
+      "signal": "SELL",
+      "confidence": 92,
+      "entry": 4698.5,
+      "stopLoss": 4717.29,
+      "takeProfit": 4670.31,
+      "trend": "BEARISH",
+      "timeframe": "5m",
+      "timestamp": "2026-04-23T17:59:17.366Z",
+      "outcome": "PENDING"
+    },
+    {
       "id": 31,
       "signal": "BUY",
       "confidence": 56,
@@ -373,5 +385,5 @@
       "outcome": "PENDING"
     }
   ],
-  "counter": 32
+  "counter": 33
 }

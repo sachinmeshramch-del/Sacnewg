@@ -1,4 +1,5 @@
 import { getFinnhubPrice, isFinnhubConnected } from "./finnhubService.js";
+import { getSpotPrice } from "./spotGoldService.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface OHLCData {
@@ -17,7 +18,7 @@ interface PriceData {
   high24h: number;
   low24h: number;
   timestamp: string;
-  source?: "finnhub" | "yahoo" | "fallback";
+  source?: "finnhub" | "yahoo" | "fallback" | "gold-api" | "stooq";
 }
 
 interface Indicators {
@@ -630,26 +631,36 @@ let cachedSignal1m: SignalResult | null = null;
 let signal1mExpiry = 0;
 
 export async function getLivePrice(): Promise<PriceData> {
-  const finnhub   = getFinnhubPrice();
-  const cacheTtl  = finnhub ? 5000 : 15000;
+  const finnhub  = getFinnhubPrice();             // OANDA:XAU_USD spot via WS
+  const spot     = !finnhub ? await getSpotPrice() : null; // gold-api / stooq spot fallback
+  const cacheTtl = finnhub || spot ? 5000 : 15000;
   if (cachedPrice && Date.now() < priceExpiry) return cachedPrice;
 
+  // Yahoo GC=F gives us 24h high/low/range context (futures track spot closely),
+  // but the *displayed* current price always comes from a true spot source so it
+  // matches TradingView's OANDA:XAUUSD chart.
   const ohlc = await fetchYahooFinance("GC=F", "5m", "1d");
 
   if (!ohlc) {
-    if (finnhub) {
-      const fp    = finnhub.price;
-      const prev  = cachedPrice?.price ?? fp;
-      const chg   = fp - prev;
+    // Yahoo unavailable — use the freshest spot we have
+    const live = finnhub
+      ? { price: finnhub.price, source: "finnhub" as const }
+      : spot
+        ? { price: spot.price, source: spot.source }
+        : null;
+
+    if (live) {
+      const prev   = cachedPrice?.price ?? live.price;
+      const chg    = live.price - prev;
       const chgPct = prev !== 0 ? (chg / prev) * 100 : 0;
       cachedPrice = {
-        price: parseFloat(fp.toFixed(2)),
+        price: parseFloat(live.price.toFixed(2)),
         change: parseFloat(chg.toFixed(2)),
         changePercent: parseFloat(chgPct.toFixed(4)),
-        high24h: parseFloat((cachedPrice?.high24h ?? fp + 15).toFixed(2)),
-        low24h:  parseFloat((cachedPrice?.low24h  ?? fp - 15).toFixed(2)),
+        high24h: parseFloat((cachedPrice?.high24h ?? live.price + 15).toFixed(2)),
+        low24h:  parseFloat((cachedPrice?.low24h  ?? live.price - 15).toFixed(2)),
         timestamp: new Date().toISOString(),
-        source: "finnhub",
+        source: live.source as PriceData["source"],
       };
       priceExpiry = Date.now() + cacheTtl;
       return cachedPrice!;
@@ -670,14 +681,31 @@ export async function getLivePrice(): Promise<PriceData> {
   const highs  = cleanArray(ohlc.high);
   const lows   = cleanArray(ohlc.low);
 
+  // PRICE SOURCE PRIORITY (must match TradingView OANDA:XAUUSD spot):
+  //   1. Finnhub WebSocket (OANDA spot)  — sub-second tick
+  //   2. gold-api.com / Stooq spot       — ~5s freshness
+  //   3. Yahoo GC=F futures last close   — last resort, drifts vs spot
   const yahooCurrent = closes[closes.length - 1];
-  const currentPrice = finnhub ? finnhub.price : yahooCurrent;
+  const currentPrice = finnhub
+    ? finnhub.price
+    : spot
+      ? spot.price
+      : yahooCurrent;
+  const priceSource: PriceData["source"] = finnhub
+    ? "finnhub"
+    : spot
+      ? (spot.source as PriceData["source"])
+      : "yahoo";
 
-  const prevClose    = closes[0];
+  // Use spot-anchored 24h range when possible to avoid futures-vs-spot offset
+  // contaminating high/low context.
+  const futuresOffset = currentPrice - yahooCurrent;
+  const high24h      = Math.max(...highs) + (priceSource !== "yahoo" ? futuresOffset : 0);
+  const low24h       = Math.min(...lows.filter(l => l > 0)) + (priceSource !== "yahoo" ? futuresOffset : 0);
+
+  const prevClose    = closes[0] + (priceSource !== "yahoo" ? futuresOffset : 0);
   const change       = currentPrice - prevClose;
   const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
-  const high24h      = Math.max(...highs);
-  const low24h       = Math.min(...lows.filter(l => l > 0));
 
   cachedPrice = {
     price: parseFloat(currentPrice.toFixed(2)),
@@ -686,7 +714,7 @@ export async function getLivePrice(): Promise<PriceData> {
     high24h: parseFloat(high24h.toFixed(2)),
     low24h:  parseFloat(low24h.toFixed(2)),
     timestamp: new Date().toISOString(),
-    source: finnhub ? "finnhub" : "yahoo",
+    source: priceSource,
   };
   priceExpiry = Date.now() + cacheTtl;
   return cachedPrice!;
