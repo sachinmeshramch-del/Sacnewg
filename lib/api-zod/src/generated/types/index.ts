@@ -46,6 +46,7 @@ export * from "./orderBlockType";
 export * from "./priceResponse";
 export * from "./scalperIndicators";
 export * from "./scalperSignalResponse";
+export * from "./scalperSignalResponseEntryQuality";
 export * from "./scalperSignalResponseHigherTrend";
 export * from "./scalperSignalResponseMarketMode";
 export * from "./scalperSignalResponseMtfStatus";

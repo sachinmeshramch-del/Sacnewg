@@ -28,6 +28,9 @@ export interface ScalperIndicators {
   atr: number;
 }
 
+/**
+ * BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming.
+ */
 export type ScalperSignalResponseSignal =
   (typeof ScalperSignalResponseSignal)[keyof typeof ScalperSignalResponseSignal];
 
@@ -35,6 +38,7 @@ export const ScalperSignalResponseSignal = {
   BUY: "BUY",
   SELL: "SELL",
   HOLD: "HOLD",
+  SETUP: "SETUP",
 } as const;
 
 export type ScalperSignalResponseTrend =
@@ -89,19 +93,30 @@ export const ScalperSignalResponseHigherTrend = {
 } as const;
 
 /**
- * Multi-timeframe alignment status between entry TF and 15m trend.
+ * WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict.
  */
 export type ScalperSignalResponseMtfStatus =
   (typeof ScalperSignalResponseMtfStatus)[keyof typeof ScalperSignalResponseMtfStatus];
 
 export const ScalperSignalResponseMtfStatus = {
+  WAITING: "WAITING",
   ALIGNED: "ALIGNED",
   BLOCKED: "BLOCKED",
-  COUNTER_TREND: "COUNTER_TREND",
-  "N/A": "N/A",
+} as const;
+
+/**
+ * EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65.
+ */
+export type ScalperSignalResponseEntryQuality =
+  (typeof ScalperSignalResponseEntryQuality)[keyof typeof ScalperSignalResponseEntryQuality];
+
+export const ScalperSignalResponseEntryQuality = {
+  EARLY: "EARLY",
+  CONFIRMED: "CONFIRMED",
 } as const;
 
 export interface ScalperSignalResponse {
+  /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming. */
   signal: ScalperSignalResponseSignal;
   confidence: number;
   entry: number;
@@ -117,8 +132,10 @@ export interface ScalperSignalResponse {
   signalType?: ScalperSignalResponseSignalType;
   /** 15m higher-timeframe trend direction used for MTF confirmation. */
   higherTrend?: ScalperSignalResponseHigherTrend;
-  /** Multi-timeframe alignment status between entry TF and 15m trend. */
+  /** WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict. */
   mtfStatus?: ScalperSignalResponseMtfStatus;
+  /** EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65. */
+  entryQuality?: ScalperSignalResponseEntryQuality;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: string;

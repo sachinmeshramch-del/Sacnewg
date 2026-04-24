@@ -312,7 +312,8 @@ components:
       properties:
         signal:
           type: string
-          enum: [BUY, SELL, HOLD]
+          enum: [BUY, SELL, HOLD, SETUP]
+          description: BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming.
         confidence:
           type: number
         entry:
@@ -344,8 +345,12 @@ components:
           description: 15m higher-timeframe trend direction used for MTF confirmation.
         mtfStatus:
           type: string
-          enum: [ALIGNED, BLOCKED, COUNTER_TREND, "N/A"]
-          description: Multi-timeframe alignment status between entry TF and 15m trend.
+          enum: [WAITING, ALIGNED, BLOCKED]
+          description: WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict.
+        entryQuality:
+          type: string
+          enum: [EARLY, CONFIRMED]
+          description: EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65.
         timeframe:
           type: string
         indicators:

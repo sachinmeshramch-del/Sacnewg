@@ -39,9 +39,10 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
   const { data, isLoading, isError, isFetching } = useCurrentSignal(timeframe);
   const lastSignalRef = useRef<string | null>(null);
 
-  // Sound + browser notification ONLY on confirmed (tradable) BUY/SELL signal
+  // Sound + browser notification ONLY on confirmed (tradable) BUY/SELL signal.
+  // SETUP / HOLD / EARLY entries don't fire alerts — they're informational.
   useEffect(() => {
-    if (!data || data.signal === "HOLD") return;
+    if (!data || data.signal !== "BUY" && data.signal !== "SELL") return;
     if (data.signalStatus !== "CONFIRMED") return;
     const key = `${data.signal}-${data.timestamp}`;
     if (key === lastSignalRef.current) return;
@@ -85,9 +86,10 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
 
   const getSignalColors = (signal?: string) => {
     switch (signal) {
-      case "BUY":  return "bg-success text-success-foreground shadow-[0_0_24px_rgba(22,163,74,0.35)] border-success/50";
-      case "SELL": return "bg-destructive text-destructive-foreground shadow-[0_0_24px_rgba(225,29,72,0.35)] border-destructive/50";
-      default:     return "bg-warning/80 text-warning-foreground shadow-[0_0_24px_rgba(245,158,11,0.25)] border-warning/50";
+      case "BUY":   return "bg-success text-success-foreground shadow-[0_0_24px_rgba(22,163,74,0.35)] border-success/50";
+      case "SELL":  return "bg-destructive text-destructive-foreground shadow-[0_0_24px_rgba(225,29,72,0.35)] border-destructive/50";
+      case "SETUP": return "bg-primary/80 text-primary-foreground shadow-[0_0_24px_rgba(59,130,246,0.30)] border-primary/50";
+      default:      return "bg-warning/80 text-warning-foreground shadow-[0_0_24px_rgba(245,158,11,0.25)] border-warning/50";
     }
   };
 
@@ -162,12 +164,16 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
             {/* Main Signal Badge */}
             <div className="flex flex-col items-center justify-center p-6 rounded-2xl bg-secondary/50 border border-white/5">
               <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3">
-                {data.signalStatus === "PENDING" ? "Awaiting Confirmation" : "Action Required"}
+                {data.signal === "SETUP"            ? "Trade Forming"
+                  : data.signal === "HOLD"          ? "No Opportunity"
+                  : data.signalStatus === "PENDING" ? "Awaiting Confirmation"
+                  :                                   "Action Required"}
               </span>
               <div className={cn(
                 "px-8 py-3 rounded-xl font-black text-3xl tracking-widest border",
                 getSignalColors(data.signal),
-                data.signalStatus === "PENDING" && data.signal !== "HOLD" && "opacity-70 ring-2 ring-warning/40 animate-pulse"
+                data.signalStatus === "PENDING" && (data.signal === "BUY" || data.signal === "SELL") && "opacity-70 ring-2 ring-warning/40 animate-pulse",
+                data.signal === "SETUP" && "ring-2 ring-primary/40"
               )}>
                 {data.signal}
               </div>
@@ -202,9 +208,10 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                     <span className="text-muted-foreground">Entry TF ({data.timeframe})</span>
                     <span className={cn(
                       "font-bold",
-                      data.signal === "BUY"  && "text-success",
-                      data.signal === "SELL" && "text-destructive",
-                      data.signal === "HOLD" && "text-muted-foreground",
+                      data.signal === "BUY"   && "text-success",
+                      data.signal === "SELL"  && "text-destructive",
+                      data.signal === "SETUP" && "text-primary",
+                      data.signal === "HOLD"  && "text-muted-foreground",
                     )}>{data.signal}</span>
                   </div>
                   {data.mtfStatus && (
@@ -212,19 +219,32 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                       <span className="text-muted-foreground">MTF Status</span>
                       <span className={cn(
                         "font-bold tracking-widest",
-                        data.mtfStatus === "ALIGNED"       && "text-success",
-                        data.mtfStatus === "BLOCKED"       && "text-destructive",
-                        data.mtfStatus === "COUNTER_TREND" && "text-warning",
-                        data.mtfStatus === "N/A"           && "text-muted-foreground",
-                      )}>{data.mtfStatus.replace("_", "-")}</span>
+                        data.mtfStatus === "ALIGNED" && "text-success",
+                        data.mtfStatus === "BLOCKED" && "text-destructive",
+                        data.mtfStatus === "WAITING" && "text-muted-foreground",
+                      )}>{data.mtfStatus}</span>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Status + Type badges */}
-              {data.signal !== "HOLD" && (data.signalStatus || data.signalType) && (
+              {/* Status + Type badges (BUY/SELL only) */}
+              {(data.signal === "BUY" || data.signal === "SELL") && (data.signalStatus || data.signalType || data.entryQuality) && (
                 <div className="mt-3 flex items-center gap-2 flex-wrap justify-center">
+                  {data.entryQuality && (
+                    <span className={cn(
+                      "px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest border inline-flex items-center gap-1",
+                      data.entryQuality === "CONFIRMED"
+                        ? "text-success border-success/40 bg-success/10"
+                        : "text-primary border-primary/40 bg-primary/10"
+                    )}>
+                      <span className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        data.entryQuality === "CONFIRMED" ? "bg-success" : "bg-primary animate-pulse"
+                      )} />
+                      {data.entryQuality}
+                    </span>
+                  )}
                   {data.signalStatus && (
                     <span className={cn(
                       "px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest border inline-flex items-center gap-1",

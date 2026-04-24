@@ -36,7 +36,11 @@ export const GetSignalQueryParams = zod.object({
 });
 
 export const GetSignalResponse = zod.object({
-  signal: zod.enum(["BUY", "SELL", "HOLD"]),
+  signal: zod
+    .enum(["BUY", "SELL", "HOLD", "SETUP"])
+    .describe(
+      "BUY\/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming.",
+    ),
   confidence: zod.number(),
   entry: zod.number(),
   stopLoss: zod.number(),
@@ -68,10 +72,16 @@ export const GetSignalResponse = zod.object({
       "15m higher-timeframe trend direction used for MTF confirmation.",
     ),
   mtfStatus: zod
-    .enum(["ALIGNED", "BLOCKED", "COUNTER_TREND", "N/A"])
+    .enum(["WAITING", "ALIGNED", "BLOCKED"])
     .optional()
     .describe(
-      "Multi-timeframe alignment status between entry TF and 15m trend.",
+      "WAITING = HOLD\/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict.",
+    ),
+  entryQuality: zod
+    .enum(["EARLY", "CONFIRMED"])
+    .optional()
+    .describe(
+      "EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65.",
     ),
   timeframe: zod.string(),
   indicators: zod.object({

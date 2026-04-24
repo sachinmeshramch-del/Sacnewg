@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ScalperIndicators } from "./scalperIndicators";
+import type { ScalperSignalResponseEntryQuality } from "./scalperSignalResponseEntryQuality";
 import type { ScalperSignalResponseHigherTrend } from "./scalperSignalResponseHigherTrend";
 import type { ScalperSignalResponseMarketMode } from "./scalperSignalResponseMarketMode";
 import type { ScalperSignalResponseMtfStatus } from "./scalperSignalResponseMtfStatus";
@@ -15,6 +16,7 @@ import type { ScalperSignalResponseSignalType } from "./scalperSignalResponseSig
 import type { ScalperSignalResponseTrend } from "./scalperSignalResponseTrend";
 
 export interface ScalperSignalResponse {
+  /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming. */
   signal: ScalperSignalResponseSignal;
   confidence: number;
   entry: number;
@@ -30,8 +32,10 @@ export interface ScalperSignalResponse {
   signalType?: ScalperSignalResponseSignalType;
   /** 15m higher-timeframe trend direction used for MTF confirmation. */
   higherTrend?: ScalperSignalResponseHigherTrend;
-  /** Multi-timeframe alignment status between entry TF and 15m trend. */
+  /** WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict. */
   mtfStatus?: ScalperSignalResponseMtfStatus;
+  /** EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65. */
+  entryQuality?: ScalperSignalResponseEntryQuality;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: Date;

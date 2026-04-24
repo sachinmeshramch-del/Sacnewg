@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming.
+ */
 export type ScalperSignalResponseSignal =
   (typeof ScalperSignalResponseSignal)[keyof typeof ScalperSignalResponseSignal];
 
@@ -13,4 +16,5 @@ export const ScalperSignalResponseSignal = {
   BUY: "BUY",
   SELL: "SELL",
   HOLD: "HOLD",
+  SETUP: "SETUP",
 } as const;

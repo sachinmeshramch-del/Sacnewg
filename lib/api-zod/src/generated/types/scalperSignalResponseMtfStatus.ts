@@ -7,14 +7,13 @@
  */
 
 /**
- * Multi-timeframe alignment status between entry TF and 15m trend.
+ * WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict.
  */
 export type ScalperSignalResponseMtfStatus =
   (typeof ScalperSignalResponseMtfStatus)[keyof typeof ScalperSignalResponseMtfStatus];
 
 export const ScalperSignalResponseMtfStatus = {
+  WAITING: "WAITING",
   ALIGNED: "ALIGNED",
   BLOCKED: "BLOCKED",
-  COUNTER_TREND: "COUNTER_TREND",
-  "N/A": "N/A",
 } as const;

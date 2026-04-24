@@ -32,7 +32,7 @@ interface Indicators {
 }
 
 interface SignalResult {
-  signal: "BUY" | "SELL" | "HOLD";
+  signal: "BUY" | "SELL" | "HOLD" | "SETUP";
   confidence: number;
   entry: number;
   stopLoss: number;
@@ -43,7 +43,8 @@ interface SignalResult {
   signalStatus?: "PENDING" | "CONFIRMED";
   signalType?: "TREND" | "REVERSAL";
   higherTrend?: "BULLISH" | "BEARISH" | "NEUTRAL";
-  mtfStatus?: "ALIGNED" | "BLOCKED" | "COUNTER_TREND" | "N/A";
+  mtfStatus?: "WAITING" | "ALIGNED" | "BLOCKED";
+  entryQuality?: "EARLY" | "CONFIRMED";
   timeframe: string;
   indicators: Indicators;
   timestamp: string;
@@ -640,40 +641,85 @@ function isStrongReversal(
 }
 
 // ── Multi-Timeframe Confirmation ──────────────────────────────────────────────
-// Higher TF (15m) defines trend direction; lower TF (5m/1m) defines entries.
-// • Aligned     → +20 confidence, mtfStatus = "ALIGNED"
-// • Counter-trend → −20 confidence, requires trap/strong-reversal AND conf ≥ 75
-//                  to survive; otherwise downgraded to HOLD with mtfStatus="BLOCKED"
-// • 15m NEUTRAL → no boost, mtfStatus = "N/A" (signal passes through unchanged)
+// Status rules (per spec):
+//   • signal == HOLD                       → mtfStatus = "WAITING"
+//   • BUY+BULLISH or SELL+BEARISH          → mtfStatus = "ALIGNED"   (+20 conf)
+//   • directional but mismatched           → mtfStatus = "BLOCKED"   (HOLD unless trap/reversal escape)
+//
+// Special states added on top:
+//   • SETUP — 15m trend known, raw is HOLD with conf 40-59 → "trade forming"
+//   • Early Trend Entry — raw is HOLD AND 15m trend known AND raw conf ≥ 60
+//     → promote to BUY/SELL with entryQuality="EARLY" so we don't miss strong moves
+//   • entryQuality: confidence ≥ 65 → "CONFIRMED", 60-64 → "EARLY"
 function applyMtfConfirmation(
   raw: Omit<SignalResult, "timestamp">,
   higherTrend: HigherTrend,
   timeframe: string,
 ): Omit<SignalResult, "timestamp"> {
-  // HOLDs and 15m-itself just get the trend tag for UI; no rules applied.
-  if (raw.signal === "HOLD" || timeframe === "15m") {
-    return { ...raw, higherTrend, mtfStatus: "N/A" };
+  // 15m feed itself just gets the trend tag for UI; no MTF rules applied.
+  if (timeframe === "15m") {
+    return { ...raw, higherTrend, mtfStatus: "WAITING" };
   }
 
-  if (higherTrend === "NEUTRAL") {
-    return { ...raw, higherTrend, mtfStatus: "N/A" };
+  const trendKnown = higherTrend === "BULLISH" || higherTrend === "BEARISH";
+  const trendDir: "BUY" | "SELL" | null =
+    higherTrend === "BULLISH" ? "BUY" :
+    higherTrend === "BEARISH" ? "SELL" : null;
+
+  // ── Early Trend Entry: raw HOLD + clear trend + conf ≥ 60 → directional ──
+  // Catches strong trending moves before the entry TF fully aligns.
+  if (raw.signal === "HOLD" && trendDir && raw.confidence >= 60) {
+    const conf = raw.confidence;
+    return {
+      ...raw,
+      signal: trendDir,
+      higherTrend,
+      mtfStatus: "ALIGNED",
+      entryQuality: conf >= 65 ? "CONFIRMED" : "EARLY",
+      signalLabel: `EARLY ${trendDir} (${higherTrend} TREND)`,
+    };
   }
 
-  const aligned =
-    (raw.signal === "BUY"  && higherTrend === "BULLISH") ||
-    (raw.signal === "SELL" && higherTrend === "BEARISH");
+  // ── SETUP: trend clear, raw still HOLD with moderate conf 40-59 ───────────
+  if (raw.signal === "HOLD" && trendDir && raw.confidence >= 40) {
+    return {
+      ...raw,
+      signal: "SETUP",
+      higherTrend,
+      mtfStatus: "WAITING",
+      signalLabel: `SETUP — preparing ${trendDir}`,
+    };
+  }
 
+  // ── Plain HOLD (no trend, or low confidence) ──────────────────────────────
+  if (raw.signal === "HOLD") {
+    return { ...raw, higherTrend, mtfStatus: "WAITING" };
+  }
+
+  // ── Directional signal with NEUTRAL higher TF → pass through ──────────────
+  if (!trendKnown) {
+    return {
+      ...raw,
+      higherTrend,
+      mtfStatus: "WAITING",
+      entryQuality: raw.confidence >= 65 ? "CONFIRMED" : "EARLY",
+    };
+  }
+
+  // ── Aligned: BUY+BULLISH or SELL+BEARISH (+20 conf bonus) ─────────────────
+  const aligned = raw.signal === trendDir;
   if (aligned) {
+    const boosted = Math.min(99, raw.confidence + 20);
     return {
       ...raw,
       higherTrend,
       mtfStatus: "ALIGNED",
-      confidence: Math.min(99, raw.confidence + 20),
+      confidence: boosted,
+      entryQuality: boosted >= 65 ? "CONFIRMED" : "EARLY",
     };
   }
 
-  // Counter-trend path — only allowed for trap/stop-hunt OR strong reversal,
-  // and only if post-penalty confidence is still ≥ 75.
+  // ── Counter-trend: trap / strong-reversal escape (penalised, must stay ≥75)
   const isTrap = !!raw.signalLabel && (
     raw.signalLabel.includes("FAKE BREAKOUT") ||
     raw.signalLabel.includes("FAKE BREAKDOWN") ||
@@ -683,15 +729,18 @@ function applyMtfConfirmation(
   const penalised  = Math.max(0, raw.confidence - 20);
 
   if ((isTrap || isReversal) && penalised >= 75) {
+    // Allowed exception — keep the directional signal but still mark BLOCKED
+    // so the UI shows it's counter-trend. The label tells you why it fired.
     return {
       ...raw,
       higherTrend,
-      mtfStatus: "COUNTER_TREND",
+      mtfStatus: "BLOCKED",
       confidence: penalised,
+      entryQuality: "CONFIRMED",
     };
   }
 
-  // Block: convert to HOLD but preserve original signal info for UI clarity.
+  // ── Plain block: directional vs higher TF → HOLD with BLOCKED status ──────
   return {
     ...raw,
     signal: "HOLD",
@@ -711,8 +760,9 @@ function applyFilters(
   lastCandleTs: number,
   indicators: ExtendedIndicators,
 ): Omit<SignalResult, "timestamp"> {
-  // HOLD passes straight through; clear any pending state
-  if (raw.signal === "HOLD") {
+  // HOLD and SETUP pass straight through (SETUP is informational only — no
+  // confirmation, no cooldown, no history, no alerts). Clear any pending state.
+  if (raw.signal === "HOLD" || raw.signal === "SETUP") {
     pendingSignal[timeframe] = null;
     return { ...raw, signalStatus: undefined, signalType: undefined };
   }
@@ -720,7 +770,12 @@ function applyFilters(
   const signalType = classifySignalType(raw.signalLabel);
 
   // ── 1. Confidence threshold (HARD floor) ─────────────────────────────────
-  const minConf = signalType === "REVERSAL" ? MIN_CONFIDENCE_REVERSAL : MIN_CONFIDENCE_TREND;
+  // EARLY entries (entryQuality="EARLY") may pass at 60+ — they're MTF-promoted
+  // trend trades, intentionally preemptive. CONFIRMED still needs the full 65/75.
+  const isEarly = raw.entryQuality === "EARLY";
+  const minConf = signalType === "REVERSAL"
+    ? MIN_CONFIDENCE_REVERSAL
+    : (isEarly ? 60 : MIN_CONFIDENCE_TREND);
   if (raw.confidence < minConf) {
     pendingSignal[timeframe] = null;
     return makeHoldFromResult(raw, Math.min(45, raw.confidence));
