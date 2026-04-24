@@ -49,6 +49,7 @@ export * from "./scalperSignalResponse";
 export * from "./scalperSignalResponseEntryQuality";
 export * from "./scalperSignalResponseHigherTrend";
 export * from "./scalperSignalResponseMarketMode";
+export * from "./scalperSignalResponseMarketState";
 export * from "./scalperSignalResponseMtfStatus";
 export * from "./scalperSignalResponseSignal";
 export * from "./scalperSignalResponseSignalStatus";

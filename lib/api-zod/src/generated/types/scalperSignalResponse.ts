@@ -9,6 +9,7 @@ import type { ScalperIndicators } from "./scalperIndicators";
 import type { ScalperSignalResponseEntryQuality } from "./scalperSignalResponseEntryQuality";
 import type { ScalperSignalResponseHigherTrend } from "./scalperSignalResponseHigherTrend";
 import type { ScalperSignalResponseMarketMode } from "./scalperSignalResponseMarketMode";
+import type { ScalperSignalResponseMarketState } from "./scalperSignalResponseMarketState";
 import type { ScalperSignalResponseMtfStatus } from "./scalperSignalResponseMtfStatus";
 import type { ScalperSignalResponseSignal } from "./scalperSignalResponseSignal";
 import type { ScalperSignalResponseSignalStatus } from "./scalperSignalResponseSignalStatus";
@@ -36,6 +37,10 @@ export interface ScalperSignalResponse {
   mtfStatus?: ScalperSignalResponseMtfStatus;
   /** EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65. */
   entryQuality?: ScalperSignalResponseEntryQuality;
+  /** Detected price-action regime — TRENDING is healthy; EXHAUSTED & REVERSAL_WATCH suppress trend trades. */
+  marketState?: ScalperSignalResponseMarketState;
+  /** Human-readable reason a directional signal was blocked (e.g. "Overextended", "Active trade open"). */
+  blockReason?: string;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: Date;

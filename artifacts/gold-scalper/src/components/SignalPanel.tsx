@@ -190,6 +190,28 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
+              {/* Market State badge — TRENDING / EXHAUSTED / REVERSAL_WATCH */}
+              {data.marketState && data.marketState !== "TRENDING" && (
+                <div className={cn(
+                  "mt-3 px-3 py-1.5 rounded-md border text-[11px] font-black tracking-widest uppercase inline-flex items-center gap-1.5",
+                  data.marketState === "EXHAUSTED"
+                    ? "border-warning/50 bg-warning/10 text-warning"
+                    : "border-amber-400/50 bg-amber-400/10 text-amber-200"
+                )}>
+                  <span className="text-base leading-none">
+                    {data.marketState === "EXHAUSTED" ? "💤" : "⚠"}
+                  </span>
+                  {data.marketState === "EXHAUSTED" ? "MOMENTUM EXHAUSTED" : "REVERSAL WATCH"}
+                </div>
+              )}
+
+              {/* Block reason — surfaces WHY a trade idea was suppressed */}
+              {data.blockReason && (
+                <div className="mt-2 px-3 py-1.5 rounded-md border border-destructive/30 bg-destructive/10 text-destructive text-[10px] font-semibold tracking-wide uppercase max-w-[260px] text-center">
+                  Blocked: {data.blockReason}
+                </div>
+              )}
+
               {/* Multi-Timeframe Confirmation panel */}
               {(data.higherTrend || data.mtfStatus) && (
                 <div className="mt-3 w-full max-w-[260px] mx-auto rounded-md border border-border/40 bg-card/40 px-3 py-2 text-[10px] tracking-wide space-y-1">

@@ -115,6 +115,18 @@ export const ScalperSignalResponseEntryQuality = {
   CONFIRMED: "CONFIRMED",
 } as const;
 
+/**
+ * Detected price-action regime — TRENDING is healthy; EXHAUSTED & REVERSAL_WATCH suppress trend trades.
+ */
+export type ScalperSignalResponseMarketState =
+  (typeof ScalperSignalResponseMarketState)[keyof typeof ScalperSignalResponseMarketState];
+
+export const ScalperSignalResponseMarketState = {
+  TRENDING: "TRENDING",
+  EXHAUSTED: "EXHAUSTED",
+  REVERSAL_WATCH: "REVERSAL_WATCH",
+} as const;
+
 export interface ScalperSignalResponse {
   /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming. */
   signal: ScalperSignalResponseSignal;
@@ -136,6 +148,10 @@ export interface ScalperSignalResponse {
   mtfStatus?: ScalperSignalResponseMtfStatus;
   /** EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65. */
   entryQuality?: ScalperSignalResponseEntryQuality;
+  /** Detected price-action regime — TRENDING is healthy; EXHAUSTED & REVERSAL_WATCH suppress trend trades. */
+  marketState?: ScalperSignalResponseMarketState;
+  /** Human-readable reason a directional signal was blocked (e.g. "Overextended", "Active trade open"). */
+  blockReason?: string;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: string;

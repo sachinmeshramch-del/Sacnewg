@@ -351,6 +351,13 @@ components:
           type: string
           enum: [EARLY, CONFIRMED]
           description: EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65.
+        marketState:
+          type: string
+          enum: [TRENDING, EXHAUSTED, REVERSAL_WATCH]
+          description: Detected price-action regime — TRENDING is healthy; EXHAUSTED & REVERSAL_WATCH suppress trend trades.
+        blockReason:
+          type: string
+          description: Human-readable reason a directional signal was blocked (e.g. "Overextended", "Active trade open").
         timeframe:
           type: string
         indicators:

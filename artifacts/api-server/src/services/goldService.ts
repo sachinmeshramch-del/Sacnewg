@@ -45,6 +45,8 @@ interface SignalResult {
   higherTrend?: "BULLISH" | "BEARISH" | "NEUTRAL";
   mtfStatus?: "WAITING" | "ALIGNED" | "BLOCKED";
   entryQuality?: "EARLY" | "CONFIRMED";
+  marketState?: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH";
+  blockReason?: string;
   timeframe: string;
   indicators: Indicators;
   timestamp: string;
@@ -113,6 +115,43 @@ const pendingSignal: Record<string, PendingSignal | null> = {
   "1m": null,
   "5m": null,
 };
+
+interface ActiveTrade {
+  signal: "BUY" | "SELL";
+  entry: number;
+  stopLoss: number;
+  takeProfit: number;
+  timestamp: number;
+}
+
+const activeTrade: Record<string, ActiveTrade | null> = {
+  "1m": null,
+  "5m": null,
+};
+
+/** Resolves an open trade if TP/SL hit or 10-min timeout exceeded. */
+function checkActiveTrade(tf: string, currentPrice: number): ActiveTrade | null {
+  const t = activeTrade[tf];
+  if (!t) return null;
+  // Auto-clear on timeout
+  if (Date.now() - t.timestamp > ACTIVE_TRADE_TIMEOUT_MS) {
+    activeTrade[tf] = null;
+    return null;
+  }
+  // Auto-clear on TP / SL hit
+  if (t.signal === "BUY") {
+    if (currentPrice >= t.takeProfit || currentPrice <= t.stopLoss) {
+      activeTrade[tf] = null;
+      return null;
+    }
+  } else {
+    if (currentPrice <= t.takeProfit || currentPrice >= t.stopLoss) {
+      activeTrade[tf] = null;
+      return null;
+    }
+  }
+  return t;
+}
 
 interface PrevState {
   rsi: number;
@@ -281,11 +320,25 @@ interface ExtendedIndicators extends Indicators {
   body: number;                // |open - close|
   wickRatio: number;           // max(upper, lower) / max(body, ε)
   trap: TrapKind | null;
+  // Momentum exhaustion + reversal-watch detection
+  exhausted: boolean;                     // last 3 candles small body + long wicks
+  reversalWatchSide: "BULLISH" | "BEARISH" | null; // big impulse + rejection wick
+  marketState: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH";
 }
 
 const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
 const MIN_WICK_TO_BODY   = 1.5;          // wick must be 1.5x the body to qualify
 const MIN_BODY_PCT       = 0.0003;       // body at least 0.03% of price (skip dojis)
+
+// ── Trade-quality filter constants ───────────────────────────────────────────
+const PRICE_DENSITY_RANGE_PTS    = 8;    // anti-stacking: same dir within 8pts → block
+const OVEREXTENSION_ATR_MULT     = 0.8;  // BLOCK if price > EMA20 ± 0.8*ATR
+const EXHAUSTION_LOOKBACK        = 3;    // last 3 candles for exhaustion check
+const EXHAUSTION_BODY_PCT        = 0.0004; // body < 0.04% of price = "small"
+const EXHAUSTION_WICK_TO_BODY    = 1.5;  // wick ≥ 1.5*body = "long wick"
+const REVERSAL_IMPULSE_BODY_PCT  = 0.0008; // body > 0.08% = "strong impulse"
+const PULLBACK_ATR_MULT          = 0.6;  // entry must be within 0.6*ATR of EMA20
+const ACTIVE_TRADE_TIMEOUT_MS    = 10 * 60 * 1000; // 10-min auto-clear
 
 function detectTrap(
   open: number, high: number, low: number, close: number,
@@ -380,12 +433,54 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
 
   const trap = detectTrap(lastOpen, lastHigh, lastLow, lastClose, resistance, support, atr, lastClose);
 
+  // ── Momentum exhaustion: last N candles all small body + long wicks ───────
+  let exhausted = false;
+  if (last >= EXHAUSTION_LOOKBACK) {
+    let small = 0;
+    for (let i = last - EXHAUSTION_LOOKBACK + 1; i <= last; i++) {
+      const o = opens[i], c = closes[i], h = highs[i], l = lows[i];
+      if (!(o > 0 && c > 0 && h > 0 && l > 0)) continue;
+      const b = Math.abs(o - c);
+      const uw = h - Math.max(o, c);
+      const lw = Math.min(o, c) - l;
+      const wick = Math.max(uw, lw);
+      const isSmall   = b < lastClose * EXHAUSTION_BODY_PCT;
+      const longWick  = wick >= b * EXHAUSTION_WICK_TO_BODY;
+      if (isSmall && longWick) small++;
+    }
+    exhausted = small >= EXHAUSTION_LOOKBACK;
+  }
+
+  // ── Reversal watch: prior candle was a strong impulse, current shows
+  //    rejection (long wick on the impulse side closing back) ───────────────
+  let reversalWatchSide: "BULLISH" | "BEARISH" | null = null;
+  if (last >= 1) {
+    const pO = opens[last - 1], pC = closes[last - 1];
+    const pBody = Math.abs(pO - pC);
+    const wasStrongImpulse = pBody >= lastClose * REVERSAL_IMPULSE_BODY_PCT;
+    if (wasStrongImpulse) {
+      const bullishImpulse = pC > pO;
+      const upperRejection = upperWick >= body * MIN_WICK_TO_BODY && upperWick > 0;
+      const lowerRejection = lowerWick >= body * MIN_WICK_TO_BODY && lowerWick > 0;
+      // Bullish impulse + upper rejection → watch for SELL reversal
+      if (bullishImpulse && upperRejection)  reversalWatchSide = "BULLISH";
+      // Bearish impulse + lower rejection → watch for BUY reversal
+      if (!bullishImpulse && lowerRejection) reversalWatchSide = "BEARISH";
+    }
+  }
+
+  const marketState: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH" =
+    exhausted             ? "EXHAUSTED"      :
+    reversalWatchSide     ? "REVERSAL_WATCH" :
+                            "TRENDING";
+
   return {
     rsi, ema20, ema50,
     macdLine, macdSignal, macdHistogram,
     atr, prevMacdHistogram, prevAtr,
     priceActionBias, lastCandleBullish, breaksPrevHigh, breaksPrevLow,
     resistance, support, upperWick, lowerWick, body, wickRatio, trap,
+    exhausted, reversalWatchSide, marketState,
   };
 }
 
@@ -764,47 +859,114 @@ function applyFilters(
   lastCandleTs: number,
   indicators: ExtendedIndicators,
 ): Omit<SignalResult, "timestamp"> {
+  // Always surface the detected market regime regardless of outcome.
+  const baseMarketState = indicators.marketState;
+
   // HOLD and SETUP pass straight through (SETUP is informational only — no
   // confirmation, no cooldown, no history, no alerts). Clear any pending state.
   if (raw.signal === "HOLD" || raw.signal === "SETUP") {
     pendingSignal[timeframe] = null;
-    return { ...raw, signalStatus: undefined, signalType: undefined };
+    return { ...raw, signalStatus: undefined, signalType: undefined, marketState: baseMarketState };
   }
 
   const signalType = classifySignalType(raw.signalLabel);
-
-  // ── 1. Confidence threshold (HARD floor) ─────────────────────────────────
-  // EARLY entries (entryQuality="EARLY") may pass at 60+ — they're MTF-promoted
-  // trend trades, intentionally preemptive. CONFIRMED still needs the full 65/75.
-  const isEarly = raw.entryQuality === "EARLY";
-  const minConf = signalType === "REVERSAL"
-    ? MIN_CONFIDENCE_REVERSAL
-    : (isEarly ? 60 : MIN_CONFIDENCE_TREND);
-  if (raw.confidence < minConf) {
-    pendingSignal[timeframe] = null;
-    return makeHoldFromResult(raw, Math.min(45, raw.confidence));
-  }
-
-  // ── 2. Cooldown — block any new signal within 3 mins of last confirmed ──
-  const lastConfirmed = lastSignalMemory[timeframe];
-  if (lastConfirmed && Date.now() - lastConfirmed.timestamp < COOLDOWN_MS) {
-    pendingSignal[timeframe] = null;
-    return makeHoldFromResult(raw, 30);
-  }
-
-  // ── 3. Reversal lock — flipping direction needs strong reversal proof.
-  //       Trap / stop-hunt signals are exempt: a fresh liquidity grab IS the
-  //       strongest reversal proof there is, and that's exactly what we want
-  //       to catch.
+  const isReversalSignal = signalType === "REVERSAL";
   const isTrapSignal = !!raw.signalLabel && (
     raw.signalLabel.includes("FAKE BREAKOUT") ||
     raw.signalLabel.includes("FAKE BREAKDOWN") ||
     raw.signalLabel.includes("STOP HUNT")
   );
+
+  // ── 1. Confidence threshold (HARD floor) ─────────────────────────────────
+  // EARLY entries (entryQuality="EARLY") may pass at 60+ — they're MTF-promoted
+  // trend trades, intentionally preemptive. CONFIRMED still needs the full 65/75.
+  const isEarly = raw.entryQuality === "EARLY";
+  const minConf = isReversalSignal
+    ? MIN_CONFIDENCE_REVERSAL
+    : (isEarly ? 60 : MIN_CONFIDENCE_TREND);
+  if (raw.confidence < minConf) {
+    pendingSignal[timeframe] = null;
+    return { ...makeHoldFromResult(raw, Math.min(45, raw.confidence)), marketState: baseMarketState };
+  }
+
+  // ── 2. Single active trade rule — only one position open at a time ───────
+  const open = checkActiveTrade(timeframe, currentPrice);
+  if (open) {
+    pendingSignal[timeframe] = null;
+    return makeBlocked(raw, baseMarketState, `Active ${open.signal} trade open`);
+  }
+
+  // ── 3. Anti-stacking — block same direction near a recent confirmed entry
+  const lastConfirmed = lastSignalMemory[timeframe];
+  if (
+    lastConfirmed &&
+    lastConfirmed.signal === raw.signal &&
+    Math.abs(currentPrice - lastConfirmed.price) <= PRICE_DENSITY_RANGE_PTS
+  ) {
+    pendingSignal[timeframe] = null;
+    return makeBlocked(raw, baseMarketState, `Stacking — same dir within ${PRICE_DENSITY_RANGE_PTS}pts of last entry`);
+  }
+
+  // ── 4. Overextension filter — no chasing extended price away from EMA20.
+  //       Trap signals are exempt (those ARE the reversal at extension).
+  const ema20 = indicators.ema20;
+  const atr = Math.max(indicators.atr, 1e-6);
+  const ext = currentPrice - ema20;
+  if (!isTrapSignal && !isReversalSignal) {
+    if (raw.signal === "BUY"  && ext >  atr * OVEREXTENSION_ATR_MULT) {
+      pendingSignal[timeframe] = null;
+      return makeBlocked(raw, baseMarketState, "Overextended above EMA20");
+    }
+    if (raw.signal === "SELL" && ext < -atr * OVEREXTENSION_ATR_MULT) {
+      pendingSignal[timeframe] = null;
+      return makeBlocked(raw, baseMarketState, "Overextended below EMA20");
+    }
+  }
+
+  // ── 5. Exhaustion filter — block trend trades when momentum has died.
+  //       Reversal & trap signals pass through (they're built for this).
+  if (indicators.exhausted && !isReversalSignal && !isTrapSignal) {
+    pendingSignal[timeframe] = null;
+    return makeBlocked(raw, "EXHAUSTED", "Momentum exhausted (3 wick-candles)");
+  }
+
+  // ── 6. Reversal watch — after impulse + rejection, block continuation.
+  //       Allow only the opposite-direction (counter-impulse) trade.
+  if (indicators.reversalWatchSide && !isTrapSignal) {
+    const impulseDir = indicators.reversalWatchSide; // direction of the impulse
+    const continuesImpulse =
+      (impulseDir === "BULLISH" && raw.signal === "BUY") ||
+      (impulseDir === "BEARISH" && raw.signal === "SELL");
+    if (continuesImpulse) {
+      pendingSignal[timeframe] = null;
+      return makeBlocked(raw, "REVERSAL_WATCH", `Reversal watch — block ${raw.signal} after ${impulseDir} impulse`);
+    }
+  }
+
+  // ── 7. Pullback zone — for trend continuation only, require entry near EMA20.
+  //       Reversal & trap signals are exempt (entries happen at extremes).
+  if (!isReversalSignal && !isTrapSignal) {
+    const distFromEma = Math.abs(currentPrice - ema20);
+    if (distFromEma > atr * PULLBACK_ATR_MULT) {
+      pendingSignal[timeframe] = null;
+      return makeBlocked(raw, baseMarketState, "Not in pullback zone (too far from EMA20)");
+    }
+  }
+
+  // ── 8. Cooldown — block any new signal within 3 mins of last confirmed ──
+  if (lastConfirmed && Date.now() - lastConfirmed.timestamp < COOLDOWN_MS) {
+    pendingSignal[timeframe] = null;
+    return { ...makeHoldFromResult(raw, 30), marketState: baseMarketState };
+  }
+
+  // ── 9. Reversal lock — flipping direction needs strong reversal proof.
+  //       Trap / stop-hunt signals are exempt: a fresh liquidity grab IS the
+  //       strongest reversal proof there is, and that's exactly what we want
+  //       to catch.
   if (lastConfirmed && raw.signal !== lastConfirmed.signal && !isTrapSignal) {
     if (!isStrongReversal(raw.signal as "BUY" | "SELL", indicators)) {
       pendingSignal[timeframe] = null;
-      return makeHoldFromResult(raw, 32);
+      return { ...makeHoldFromResult(raw, 32), marketState: baseMarketState };
     }
   }
 
@@ -844,6 +1006,24 @@ function makeHoldFromResult(result: Omit<SignalResult, "timestamp">, confidence:
     confidence,
     signalStatus: undefined,
     signalType: undefined,
+  };
+}
+
+/** Soft-block: convert a directional signal to HOLD with a human-readable reason. */
+function makeBlocked(
+  result: Omit<SignalResult, "timestamp">,
+  marketState: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH",
+  reason: string,
+): Omit<SignalResult, "timestamp"> {
+  return {
+    ...result,
+    signal: "HOLD",
+    confidence: Math.max(20, Math.min(40, result.confidence - 15)),
+    signalStatus: undefined,
+    signalType: undefined,
+    mtfStatus: "WAITING",
+    marketState,
+    blockReason: reason,
   };
 }
 
@@ -1037,6 +1217,9 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       body: 0,
       wickRatio: 0,
       trap: null,
+      exhausted: false,
+      reversalWatchSide: null,
+      marketState: "TRENDING",
     };
   }
 
@@ -1057,11 +1240,19 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
   const mtfAdjusted    = applyMtfConfirmation(rawResult, higherTrend, timeframe);
   const filteredResult = applyFilters(mtfAdjusted, tfKey, currentPrice, lastCandleTs, indicators);
 
-  // Record a confirmed signal — starts the 3-min cooldown
+  // Record a confirmed signal — starts the 3-min cooldown AND opens the
+  // single active trade slot (cleared on TP/SL hit or 10-min timeout).
   if (filteredResult.signal !== "HOLD" && filteredResult.signalStatus === "CONFIRMED") {
     lastSignalMemory[tfKey] = {
       signal: filteredResult.signal as "BUY" | "SELL",
       price: currentPrice,
+      timestamp: Date.now(),
+    };
+    activeTrade[tfKey] = {
+      signal: filteredResult.signal as "BUY" | "SELL",
+      entry: filteredResult.entry,
+      stopLoss: filteredResult.stopLoss,
+      takeProfit: filteredResult.takeProfit,
       timestamp: Date.now(),
     };
   }

@@ -83,6 +83,18 @@ export const GetSignalResponse = zod.object({
     .describe(
       "EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65.",
     ),
+  marketState: zod
+    .enum(["TRENDING", "EXHAUSTED", "REVERSAL_WATCH"])
+    .optional()
+    .describe(
+      "Detected price-action regime — TRENDING is healthy; EXHAUSTED & REVERSAL_WATCH suppress trend trades.",
+    ),
+  blockReason: zod
+    .string()
+    .optional()
+    .describe(
+      'Human-readable reason a directional signal was blocked (e.g. \"Overextended\", \"Active trade open\").',
+    ),
   timeframe: zod.string(),
   indicators: zod.object({
     rsi: zod.number(),
