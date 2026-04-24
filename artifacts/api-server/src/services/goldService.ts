@@ -740,13 +740,17 @@ function applyMtfConfirmation(
     };
   }
 
-  // ── Plain block: directional vs higher TF → HOLD with BLOCKED status ──────
+  // ── Plain block: directional vs higher TF → HOLD ──────────────────────────
+  // Per spec, mtfStatus must be WAITING whenever the final signal is HOLD —
+  // BLOCKED is reserved for the trap-exception case above where the signal
+  // STAYS directional but is counter-trend. The signalLabel still records
+  // exactly what was blocked, so the user knows why we held.
   return {
     ...raw,
     signal: "HOLD",
     confidence: Math.max(20, penalised),
     higherTrend,
-    mtfStatus: "BLOCKED",
+    mtfStatus: "WAITING",
     signalLabel: `MTF BLOCKED (${raw.signal} vs ${higherTrend})`,
   };
 }
