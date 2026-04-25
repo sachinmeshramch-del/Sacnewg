@@ -234,6 +234,51 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
+              {/* Pullback Entry Engine — fired signal banner */}
+              {(data.signalLabel === "BUY_PULLBACK" || data.signalLabel === "SELL_PULLBACK") && (
+                <div className={cn(
+                  "mt-3 px-3 py-1.5 rounded-md border-2 text-[11px] font-black tracking-widest uppercase inline-flex items-center gap-1.5",
+                  data.signalLabel === "BUY_PULLBACK"
+                    ? "border-success/60 bg-success/10 text-success shadow-[0_0_18px_rgba(22,163,74,0.25)]"
+                    : "border-destructive/60 bg-destructive/10 text-destructive shadow-[0_0_18px_rgba(225,29,72,0.25)]"
+                )}>
+                  <span className="text-base leading-none">🎯</span>
+                  {data.signalLabel === "BUY_PULLBACK" ? "BUY PULLBACK CONFIRMED" : "SELL PULLBACK CONFIRMED"}
+                </div>
+              )}
+
+              {/* Pullback Entry Engine — zone + rejection live status */}
+              {(data.zoneStatus || data.pullbackConfirmation) && (
+                <div className="mt-3 w-full max-w-[260px] mx-auto rounded-md border border-border/40 bg-card/40 px-3 py-2 text-[10px] tracking-wide space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Pullback Zone</span>
+                    <span className={cn(
+                      "font-bold tracking-widest",
+                      data.zoneStatus === "BUY_ZONE"  && "text-success",
+                      data.zoneStatus === "SELL_ZONE" && "text-destructive",
+                      (!data.zoneStatus || data.zoneStatus === "NO_ZONE") && "text-muted-foreground",
+                    )}>
+                      {data.zoneStatus === "BUY_ZONE"  ? "BUY ZONE"
+                        : data.zoneStatus === "SELL_ZONE" ? "SELL ZONE"
+                        :                                    "NO ZONE"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                    <span className="text-muted-foreground">Confirmation</span>
+                    <span className={cn(
+                      "font-bold tracking-widest inline-flex items-center gap-1",
+                      data.pullbackConfirmation === "REJECTION_DETECTED" ? "text-success" : "text-warning",
+                    )}>
+                      <span className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        data.pullbackConfirmation === "REJECTION_DETECTED" ? "bg-success" : "bg-warning animate-pulse",
+                      )} />
+                      {data.pullbackConfirmation === "REJECTION_DETECTED" ? "REJECTION" : "WAITING"}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Multi-Timeframe Confirmation panel */}
               {(data.higherTrend || data.mtfStatus) && (
                 <div className="mt-3 w-full max-w-[260px] mx-auto rounded-md border border-border/40 bg-card/40 px-3 py-2 text-[10px] tracking-wide space-y-1">

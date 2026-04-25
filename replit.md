@@ -95,6 +95,8 @@ Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHea
 
 React + Vite web app at `/` (port 23682). Gold Scalper AI — 5-15 minute scalping signals using RSI/EMA9/EMA21/MACD/ATR. Features live Yahoo Finance price, TradingView chart widget, signal history, risk calculator, Telegram alerts.
 
+**Pullback Entry Engine** (`artifacts/api-server/src/services/goldService.ts`): WEAK trend states no longer fire random "near EMA20" entries. Instead, the engine waits for: (1) price inside the EMA20 ± ATR×0.5 zone (clamped 3–6 pts) → `zoneStatus` = `BUY_ZONE`/`SELL_ZONE`; (2) a rejection candle (wick ≥ 1.5× body, matching close direction, real body) → `pullbackConfirmation` = `REJECTION_DETECTED`; (3) RSI inside 40–55 (BUY) or 45–60 (SELL). On confirmation, fires with `signalLabel = BUY_PULLBACK` / `SELL_PULLBACK`, swing-based SL (clamped to entry ± ATR), TP at entry ± ATR×2, and confidence ≥ 70. The MTF + active-trade + EXHAUSTED filters from `applyFilters` still apply on top. The UI shows live "Pullback Zone" / "Confirmation" status badges in `SignalPanel.tsx` regardless of trend strength.
+
 ### `artifacts/gold-intraday` (`@workspace/gold-intraday`)
 
 React + Vite web app at `/intraday/` (port 23161). Gold Intraday AI Trader — 1-4 hour intraday signals using EMA20/EMA50, support/resistance, multi-timeframe analysis (15m/30m/1h). No Telegram integration.

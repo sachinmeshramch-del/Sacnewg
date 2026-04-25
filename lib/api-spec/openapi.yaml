@@ -362,6 +362,14 @@ components:
         blockReason:
           type: string
           description: Human-readable reason a directional signal was blocked (e.g. "Overextended", "Active trade open").
+        zoneStatus:
+          type: string
+          enum: [BUY_ZONE, SELL_ZONE, NO_ZONE]
+          description: Pullback Entry Engine — BUY_ZONE/SELL_ZONE = price within EMA20 ± (ATR×0.5) on a WEAK trend; NO_ZONE otherwise.
+        pullbackConfirmation:
+          type: string
+          enum: [WAITING, REJECTION_DETECTED]
+          description: Pullback Entry Engine — REJECTION_DETECTED when a rejection candle (wick ≥ 1.5× body in the entry direction) prints inside the zone.
         timeframe:
           type: string
         indicators:

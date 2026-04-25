@@ -101,6 +101,18 @@ export const GetSignalResponse = zod.object({
     .describe(
       'Human-readable reason a directional signal was blocked (e.g. \"Overextended\", \"Active trade open\").',
     ),
+  zoneStatus: zod
+    .enum(["BUY_ZONE", "SELL_ZONE", "NO_ZONE"])
+    .optional()
+    .describe(
+      "Pullback Entry Engine — BUY_ZONE\/SELL_ZONE = price within EMA20 ± (ATR×0.5) on a WEAK trend; NO_ZONE otherwise.",
+    ),
+  pullbackConfirmation: zod
+    .enum(["WAITING", "REJECTION_DETECTED"])
+    .optional()
+    .describe(
+      "Pullback Entry Engine — REJECTION_DETECTED when a rejection candle (wick ≥ 1.5× body in the entry direction) prints inside the zone.",
+    ),
   timeframe: zod.string(),
   indicators: zod.object({
     rsi: zod.number(),

@@ -48,6 +48,8 @@ interface SignalResult {
   entryQuality?: "EARLY" | "CONFIRMED";
   marketState?: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH";
   blockReason?: string;
+  zoneStatus?: "BUY_ZONE" | "SELL_ZONE" | "NO_ZONE";
+  pullbackConfirmation?: "WAITING" | "REJECTION_DETECTED";
   timeframe: string;
   indicators: Indicators;
   timestamp: string;
@@ -332,6 +334,10 @@ interface ExtendedIndicators extends Indicators {
   swingHigh2: number;   // previous swing high
   swingLow1:  number;   // most recent confirmed swing low
   swingLow2:  number;   // previous swing low
+  // Pullback Entry Engine — zone + rejection-candle confirmation
+  pullbackRange: number;                                    // ATR*0.5, clamped 3..6 pts
+  zoneStatus: "BUY_ZONE" | "SELL_ZONE" | "NO_ZONE";
+  pullbackConfirmation: "WAITING" | "REJECTION_DETECTED";
 }
 
 const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
@@ -586,6 +592,25 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
   // ── Smart Trend Engine — EMA + structure (HH/HL/LH/LL) ────────────────────
   const smart = classifySmartTrend(ema20, ema50, lastClose, highs, lows);
 
+  // ── Pullback Entry Engine — zone + rejection candle ──────────────────────
+  // Zone width = ATR*0.5, clamped to 3..6 points (gold pip scale).
+  const pullbackRange = Math.min(6, Math.max(3, atr * 0.5));
+  const distFromEma20 = Math.abs(lastClose - ema20);
+
+  let zoneStatus: "BUY_ZONE" | "SELL_ZONE" | "NO_ZONE" = "NO_ZONE";
+  if (distFromEma20 <= pullbackRange) {
+    if (smart.direction === "BULLISH" && smart.strength === "WEAK")  zoneStatus = "BUY_ZONE";
+    if (smart.direction === "BEARISH" && smart.strength === "WEAK")  zoneStatus = "SELL_ZONE";
+  }
+
+  // Rejection candle: requires a real body (skip dojis) and matching wick/close.
+  const meaningfulBody = body >= lastClose * MIN_BODY_PCT;
+  const buyRejection  = lowerWick >= body * MIN_WICK_TO_BODY && lastCandleBullish && meaningfulBody;
+  const sellRejection = upperWick >= body * MIN_WICK_TO_BODY && !lastCandleBullish && meaningfulBody;
+  let pullbackConfirmation: "WAITING" | "REJECTION_DETECTED" = "WAITING";
+  if (zoneStatus === "BUY_ZONE"  && buyRejection)  pullbackConfirmation = "REJECTION_DETECTED";
+  if (zoneStatus === "SELL_ZONE" && sellRejection) pullbackConfirmation = "REJECTION_DETECTED";
+
   return {
     rsi, ema20, ema50,
     macdLine, macdSignal, macdHistogram,
@@ -599,6 +624,9 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     swingHigh2:     smart.swingHigh2,
     swingLow1:      smart.swingLow1,
     swingLow2:      smart.swingLow2,
+    pullbackRange,
+    zoneStatus,
+    pullbackConfirmation,
   };
 }
 
@@ -667,6 +695,77 @@ function makeBuy(
     signalLabel,
     timeframe,
     indicators,
+  };
+}
+
+// ── Pullback Entry Engine ──────────────────────────────────────────────────────
+// Fires only on WEAK trend states with price inside the EMA20 zone, after a
+// rejection candle prints, and inside a tight RSI window. Builds a signal with
+// swing-based stop and 2× ATR target (R:R ≈ 2:1).
+function tryPullbackEntry(
+  ind: ExtendedIndicators,
+  currentPrice: number,
+  marketMode: "TRENDING" | "SIDEWAYS",
+  timeframe: string,
+  side: "BUY" | "SELL",
+): Omit<SignalResult, "timestamp"> | null {
+  const { zoneStatus, pullbackConfirmation, rsi, atr, swingLow1, swingHigh1, lastCandleBullish } = ind;
+
+  // Hard gates per spec
+  if (side === "BUY") {
+    if (zoneStatus !== "BUY_ZONE") return null;
+    if (pullbackConfirmation !== "REJECTION_DETECTED") return null;
+    if (rsi < 40 || rsi > 55) return null;
+    if (!lastCandleBullish) return null;
+  } else {
+    if (zoneStatus !== "SELL_ZONE") return null;
+    if (pullbackConfirmation !== "REJECTION_DETECTED") return null;
+    if (rsi < 45 || rsi > 60) return null;
+    if (lastCandleBullish) return null;
+  }
+
+  const entry = currentPrice;
+  let sl: number, tp: number;
+
+  if (side === "BUY") {
+    // SL = recent swing low OR entry - ATR (whichever is further from entry,
+    // capped to entry - 0.5*ATR so we never use a stop-too-tight in chop).
+    const swingSl   = swingLow1 > 0 && swingLow1 < entry ? swingLow1 : entry - atr;
+    const atrFloor  = entry - atr;
+    sl = Math.min(swingSl, atrFloor);
+    sl = Math.min(sl, entry - atr * 0.5);  // keep at least half-ATR distance
+    tp = entry + atr * 2;
+  } else {
+    const swingSl   = swingHigh1 > 0 && swingHigh1 > entry ? swingHigh1 : entry + atr;
+    const atrCeil   = entry + atr;
+    sl = Math.max(swingSl, atrCeil);
+    sl = Math.max(sl, entry + atr * 0.5);
+    tp = entry - atr * 2;
+  }
+
+  // Confidence: base 70 (above the 65 floor) + small bonuses for clean setup.
+  let conf = 70;
+  // Sweet-spot RSI in middle of the window earns a small bonus.
+  const sweet = side === "BUY" ? 47.5 : 52.5;
+  conf += Math.max(0, 5 - Math.abs(rsi - sweet));
+  // Tight zone (price hugging EMA20) earns a small bonus.
+  const distFromEma20 = Math.abs(entry - ind.ema20);
+  if (distFromEma20 <= ind.pullbackRange * 0.5) conf += 3;
+
+  return {
+    signal: side,
+    confidence: Math.min(95, Math.round(conf)),
+    entry: parseFloat(entry.toFixed(2)),
+    stopLoss: parseFloat(sl.toFixed(2)),
+    takeProfit: parseFloat(tp.toFixed(2)),
+    trend: side === "BUY" ? "BULLISH" : "BEARISH",
+    trendStrength: ind.trendStrength,
+    marketMode,
+    signalLabel: side === "BUY" ? "BUY_PULLBACK" : "SELL_PULLBACK",
+    timeframe,
+    indicators: ind,
+    zoneStatus,
+    pullbackConfirmation,
   };
 }
 
@@ -783,24 +882,25 @@ function generateSignal(
   // ── 6. BEARISH TREND LOGIC ───────────────────────────────────────────────
   if (isBearishTrend) {
 
-    // SELL ALLOWED IF: STRONG bearish, OR (WEAK bearish AND price near EMA20).
-    // WEAK bearish away from EMA20 = no chase → HOLD.
-    const sellAllowed =
-      trendStrength === "STRONG" || (trendStrength === "WEAK" && nearEma20);
+    // ── WEAK bearish: ONLY the Pullback Entry Engine can fire a SELL.
+    //    No more random "near EMA20" entries — require zone + rejection + RSI.
+    if (trendStrength === "WEAK") {
+      const pb = tryPullbackEntry(indicators, currentPrice, marketMode, timeframe, "SELL");
+      if (pb) return pb;
+      // WEAK + no confirmed pullback → HOLD (do not chase).
+      return makeHold(currentPrice, atr, "BEARISH", marketMode, timeframe, indicators, 32 + strengthDelta);
+    }
 
-    if (macdBearish && sellAllowed) {
-      let conf = 62;                                      // base
-      conf += strengthDelta;                              // STRONG +20 / WEAK -10
+    // ── STRONG bearish: existing trend-following logic ───────────────────
+    if (macdBearish) {
+      let conf = 62 + strengthDelta;                      // STRONG +20
       if (!lastCandleBullish && breaksPrevLow) conf += 12;
       else if (!lastCandleBullish)             conf += 5;
       if (pullbackSell)  conf += 15;
       if (macdBearCross) conf += 10;
       if (atrRising)     conf += 5;
       if (priceActionBias === "BEARISH") conf += 5;
-      const label =
-        trendStrength === "WEAK" ? "WEAK BEARISH PULLBACK SELL" :
-        pullbackSell             ? "PULLBACK SELL" :
-                                   "TREND FOLLOWING SELL";
+      const label = pullbackSell ? "PULLBACK SELL" : "TREND FOLLOWING SELL";
       return makeSell(currentPrice, atr, conf, marketMode, timeframe, indicators, label);
     }
 
@@ -812,8 +912,6 @@ function generateSignal(
       if (lastCandleBullish && breaksPrevHigh) conf += 12;
       else if (lastCandleBullish)              conf += 5;
       if (macdBullCross) conf += 10;
-      // Reversal vs WEAK bearish has a stronger case (trend already faltering)
-      if (trendStrength === "WEAK") conf += 5;
       return makeBuy(currentPrice, atr, Math.min(78, conf), marketMode, timeframe, indicators, "REVERSAL BUY");
     }
 
@@ -824,23 +922,23 @@ function generateSignal(
   // ── 7. BULLISH TREND LOGIC ───────────────────────────────────────────────
   if (isBullishTrend) {
 
-    // BUY ALLOWED IF: STRONG bullish, OR (WEAK bullish AND price near EMA20).
-    const buyAllowed =
-      trendStrength === "STRONG" || (trendStrength === "WEAK" && nearEma20);
+    // ── WEAK bullish: ONLY the Pullback Entry Engine can fire a BUY.
+    if (trendStrength === "WEAK") {
+      const pb = tryPullbackEntry(indicators, currentPrice, marketMode, timeframe, "BUY");
+      if (pb) return pb;
+      return makeHold(currentPrice, atr, "BULLISH", marketMode, timeframe, indicators, 32 + strengthDelta);
+    }
 
-    if (macdBullish && buyAllowed) {
-      let conf = 62;
-      conf += strengthDelta;
+    // ── STRONG bullish: existing trend-following logic ───────────────────
+    if (macdBullish) {
+      let conf = 62 + strengthDelta;
       if (lastCandleBullish && breaksPrevHigh) conf += 12;
       else if (lastCandleBullish)              conf += 5;
       if (pullbackBuy)   conf += 15;
       if (macdBullCross) conf += 10;
       if (atrRising)     conf += 5;
       if (priceActionBias === "BULLISH") conf += 5;
-      const label =
-        trendStrength === "WEAK" ? "WEAK BULLISH PULLBACK BUY" :
-        pullbackBuy              ? "PULLBACK BUY" :
-                                   "TREND FOLLOWING BUY";
+      const label = pullbackBuy ? "PULLBACK BUY" : "TREND FOLLOWING BUY";
       return makeBuy(currentPrice, atr, conf, marketMode, timeframe, indicators, label);
     }
 
@@ -851,7 +949,6 @@ function generateSignal(
       if (!lastCandleBullish && breaksPrevLow) conf += 12;
       else if (!lastCandleBullish)             conf += 5;
       if (macdBearCross) conf += 10;
-      if (trendStrength === "WEAK") conf += 5;
       return makeSell(currentPrice, atr, Math.min(78, conf), marketMode, timeframe, indicators, "REVERSAL SELL");
     }
 
@@ -1377,6 +1474,9 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       swingHigh2: base + 5,
       swingLow1:  base - 5,
       swingLow2:  base - 5,
+      pullbackRange: Math.min(6, Math.max(3, atr * 0.5)),
+      zoneStatus: "NO_ZONE",
+      pullbackConfirmation: "WAITING",
     };
   }
 
@@ -1416,6 +1516,11 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
 
   const result: SignalResult = {
     ...filteredResult,
+    // Always surface Pullback Engine status from indicators so the UI can show
+    // the live zone + rejection state regardless of which branch produced the
+    // final signal (HOLD, SETUP, BUY/SELL, blocked, etc.).
+    zoneStatus: filteredResult.zoneStatus ?? indicators.zoneStatus,
+    pullbackConfirmation: filteredResult.pullbackConfirmation ?? indicators.pullbackConfirmation,
     timestamp: new Date().toISOString(),
   };
 

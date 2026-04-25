@@ -11,11 +11,13 @@ import type { ScalperSignalResponseHigherTrend } from "./scalperSignalResponseHi
 import type { ScalperSignalResponseMarketMode } from "./scalperSignalResponseMarketMode";
 import type { ScalperSignalResponseMarketState } from "./scalperSignalResponseMarketState";
 import type { ScalperSignalResponseMtfStatus } from "./scalperSignalResponseMtfStatus";
+import type { ScalperSignalResponsePullbackConfirmation } from "./scalperSignalResponsePullbackConfirmation";
 import type { ScalperSignalResponseSignal } from "./scalperSignalResponseSignal";
 import type { ScalperSignalResponseSignalStatus } from "./scalperSignalResponseSignalStatus";
 import type { ScalperSignalResponseSignalType } from "./scalperSignalResponseSignalType";
 import type { ScalperSignalResponseTrend } from "./scalperSignalResponseTrend";
 import type { ScalperSignalResponseTrendStrength } from "./scalperSignalResponseTrendStrength";
+import type { ScalperSignalResponseZoneStatus } from "./scalperSignalResponseZoneStatus";
 
 export interface ScalperSignalResponse {
   /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming. */
@@ -44,6 +46,10 @@ export interface ScalperSignalResponse {
   marketState?: ScalperSignalResponseMarketState;
   /** Human-readable reason a directional signal was blocked (e.g. "Overextended", "Active trade open"). */
   blockReason?: string;
+  /** Pullback Entry Engine — BUY_ZONE/SELL_ZONE = price within EMA20 ± (ATR×0.5) on a WEAK trend; NO_ZONE otherwise. */
+  zoneStatus?: ScalperSignalResponseZoneStatus;
+  /** Pullback Entry Engine — REJECTION_DETECTED when a rejection candle (wick ≥ 1.5× body in the entry direction) prints inside the zone. */
+  pullbackConfirmation?: ScalperSignalResponsePullbackConfirmation;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: Date;
