@@ -38,6 +38,7 @@ interface SignalResult {
   stopLoss: number;
   takeProfit: number;
   trend: "BULLISH" | "BEARISH" | "NEUTRAL";
+  trendStrength?: "STRONG" | "WEAK" | "RANGE";
   marketMode: "TRENDING" | "SIDEWAYS";
   signalLabel?: string;
   signalStatus?: "PENDING" | "CONFIRMED";
@@ -324,11 +325,23 @@ interface ExtendedIndicators extends Indicators {
   exhausted: boolean;                     // last 3 candles small body + long wicks
   reversalWatchSide: "BULLISH" | "BEARISH" | null; // big impulse + rejection wick
   marketState: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH";
+  // Smart Trend Engine — combines EMA + market structure (swing HH/HL/LH/LL)
+  trendDirection: "BULLISH" | "BEARISH" | "SIDEWAYS";
+  trendStrength: "STRONG" | "WEAK" | "RANGE";
+  swingHigh1: number;   // most recent confirmed swing high
+  swingHigh2: number;   // previous swing high
+  swingLow1:  number;   // most recent confirmed swing low
+  swingLow2:  number;   // previous swing low
 }
 
 const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
 const MIN_WICK_TO_BODY   = 1.5;          // wick must be 1.5x the body to qualify
 const MIN_BODY_PCT       = 0.0003;       // body at least 0.03% of price (skip dojis)
+
+// ── Smart Trend Engine constants ─────────────────────────────────────────────
+const SWING_PIVOT_K              = 2;    // candle is a pivot if higher/lower than K bars on each side
+const SWING_LOOKBACK             = 30;   // scan last 30 candles for pivots
+const EMA_NEUTRAL_SEPARATION_PCT = 0.0008; // EMAs within 0.08% → SIDEWAYS bias
 
 // ── Trade-quality filter constants ───────────────────────────────────────────
 const PRICE_DENSITY_RANGE_PTS    = 8;    // anti-stacking: same dir within 8pts → block
@@ -373,6 +386,102 @@ function detectTrap(
     return "STOP_HUNT_BUY";
   }
   return null;
+}
+
+// ── Smart Trend Engine ───────────────────────────────────────────────────────
+// Pivot-based swing detection: a candle at index i is a swing high if its high
+// is strictly greater than the K candles before and after. Same for lows.
+// Returns the two most recent confirmed swings (most recent first).
+function findSwings(highs: number[], lows: number[], k = SWING_PIVOT_K): {
+  swingHighs: number[]; swingLows: number[];
+} {
+  const n = Math.min(highs.length, lows.length);
+  const start = Math.max(k, n - SWING_LOOKBACK);
+  const swingHighs: number[] = [];
+  const swingLows: number[]  = [];
+  // Note: cannot confirm a pivot for the very last K candles (no right-side context).
+  for (let i = start; i < n - k; i++) {
+    const h = highs[i];
+    const l = lows[i];
+    if (!(h > 0)) continue;
+    let isHigh = true, isLow = l > 0;
+    for (let j = 1; j <= k; j++) {
+      if (highs[i - j] >= h || highs[i + j] >= h) isHigh = false;
+      if (l > 0 && (lows[i - j] <= l || lows[i + j] <= l)) isLow = false;
+      if (!isHigh && !isLow) break;
+    }
+    if (isHigh) swingHighs.push(h);
+    if (isLow)  swingLows.push(l);
+  }
+  // Most recent first
+  swingHighs.reverse();
+  swingLows.reverse();
+  return { swingHighs, swingLows };
+}
+
+interface SmartTrend {
+  direction: "BULLISH" | "BEARISH" | "SIDEWAYS";
+  strength: "STRONG" | "WEAK" | "RANGE";
+  swingHigh1: number;
+  swingHigh2: number;
+  swingLow1:  number;
+  swingLow2:  number;
+}
+
+/**
+ * Smart Trend Engine — combines EMA bias with market structure.
+ *
+ *   STRONG BULLISH = EMA20 > EMA50  +  HH (lastHigh > prevHigh)  +  HL (lastLow > prevLow)
+ *   WEAK BULLISH   = EMA20 > EMA50  but no HH (pullback / weakening)
+ *   STRONG BEARISH = EMA20 < EMA50  +  LL (lastLow < prevLow)    +  LH (lastHigh < prevHigh)
+ *   WEAK BEARISH   = EMA20 < EMA50  but no LL
+ *   SIDEWAYS       = EMAs hugging or no structural conviction
+ */
+function classifySmartTrend(
+  ema20: number, ema50: number, currentPrice: number,
+  highs: number[], lows: number[],
+): SmartTrend {
+  const { swingHighs, swingLows } = findSwings(highs, lows);
+  const lastHigh = swingHighs[0] ?? Math.max(...highs.slice(-5).filter(x => x > 0), 0);
+  const prevHigh = swingHighs[1] ?? lastHigh;
+  const lastLow  = swingLows[0]  ?? Math.min(...lows.slice(-5).filter(x => x > 0),  Number.POSITIVE_INFINITY);
+  const prevLow  = swingLows[1]  ?? lastLow;
+
+  const HH = lastHigh > prevHigh;     // higher high
+  const LH = lastHigh <= prevHigh;    // lower (or equal) high
+  const HL = lastLow  > prevLow;      // higher low
+  const LL = lastLow  <= prevLow;     // lower (or equal) low
+
+  const sepPct  = Math.abs(ema20 - ema50) / Math.max(currentPrice, 1e-6);
+  const isFlat  = sepPct < EMA_NEUTRAL_SEPARATION_PCT;
+  const isBull  = ema20 > ema50;
+  const isBear  = ema20 < ema50;
+
+  // SIDEWAYS — flat EMAs and no clear structural breakout
+  if (isFlat && !(HH && HL) && !(LL && LH)) {
+    return { direction: "SIDEWAYS", strength: "RANGE",
+      swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+  }
+
+  if (isBull) {
+    const strength: "STRONG" | "WEAK" = (HH && HL) ? "STRONG" : "WEAK";
+    return { direction: "BULLISH", strength,
+      swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+  }
+  if (isBear) {
+    const strength: "STRONG" | "WEAK" = (LL && LH) ? "STRONG" : "WEAK";
+    return { direction: "BEARISH", strength,
+      swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+  }
+
+  // EMAs flat but structure leans one way → emit WEAK directional bias
+  if (HH && HL) return { direction: "BULLISH", strength: "WEAK",
+    swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+  if (LL && LH) return { direction: "BEARISH", strength: "WEAK",
+    swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+
+  return { direction: "SIDEWAYS", strength: "RANGE",
+    swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
 }
 
 function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicators {
@@ -474,6 +583,9 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     reversalWatchSide     ? "REVERSAL_WATCH" :
                             "TRENDING";
 
+  // ── Smart Trend Engine — EMA + structure (HH/HL/LH/LL) ────────────────────
+  const smart = classifySmartTrend(ema20, ema50, lastClose, highs, lows);
+
   return {
     rsi, ema20, ema50,
     macdLine, macdSignal, macdHistogram,
@@ -481,6 +593,12 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     priceActionBias, lastCandleBullish, breaksPrevHigh, breaksPrevLow,
     resistance, support, upperWick, lowerWick, body, wickRatio, trap,
     exhausted, reversalWatchSide, marketState,
+    trendDirection: smart.direction,
+    trendStrength:  smart.strength,
+    swingHigh1:     smart.swingHigh1,
+    swingHigh2:     smart.swingHigh2,
+    swingLow1:      smart.swingLow1,
+    swingLow2:      smart.swingLow2,
   };
 }
 
@@ -501,6 +619,7 @@ function makeHold(
     stopLoss: parseFloat((price - atr * 0.8).toFixed(2)),
     takeProfit: parseFloat((price + atr * 1.2).toFixed(2)),
     trend,
+    trendStrength: indicators.trendStrength,
     marketMode,
     timeframe,
     indicators,
@@ -521,6 +640,7 @@ function makeSell(
     stopLoss: parseFloat((price + slDist).toFixed(2)),
     takeProfit: parseFloat((price - tpDist).toFixed(2)),
     trend: "BEARISH",
+    trendStrength: indicators.trendStrength,
     marketMode,
     signalLabel,
     timeframe,
@@ -542,6 +662,7 @@ function makeBuy(
     stopLoss: parseFloat((price - slDist).toFixed(2)),
     takeProfit: parseFloat((price + tpDist).toFixed(2)),
     trend: "BULLISH",
+    trendStrength: indicators.trendStrength,
     marketMode,
     signalLabel,
     timeframe,
@@ -559,7 +680,7 @@ function generateSignal(
     rsi, ema20, ema50, macdLine, macdSignal, macdHistogram,
     atr, prevMacdHistogram, prevAtr,
     priceActionBias, lastCandleBullish, breaksPrevHigh, breaksPrevLow,
-    trap,
+    trap, trendDirection, trendStrength,
   } = indicators;
 
   // ── 1. ATR Volatility Filter ─────────────────────────────────────────────
@@ -628,9 +749,12 @@ function generateSignal(
     return makeHold(currentPrice, atr, "NEUTRAL", marketMode, timeframe, indicators, 28);
   }
 
-  // ── 5. TRENDING — Trend Direction ────────────────────────────────────────
-  const bearishTrend = ema20 < ema50;
-  const bullishTrend = ema20 > ema50;
+  // ── 5. SMART TREND ENGINE — EMA + Structure (HH/HL/LH/LL) ────────────────
+  // Replaces the simple "EMA20 vs EMA50" classifier. trendDirection comes from
+  // classifySmartTrend which combines EMA bias with confirmed swing structure.
+  const isBullishTrend = trendDirection === "BULLISH";
+  const isBearishTrend = trendDirection === "BEARISH";
+  const isSidewaysTrend = trendDirection === "SIDEWAYS";
 
   // MACD direction — RSI no longer blocks SELL in a bearish trend
   const macdBearish = macdLine < macdSignal || macdHistogram < 0;
@@ -638,73 +762,100 @@ function generateSignal(
   const macdBearCross = macdHistogram < 0 && prevMacdHistogram >= 0; // fresh bearish cross
   const macdBullCross = macdHistogram > 0 && prevMacdHistogram <= 0; // fresh bullish cross
 
-  // Pullback detection (price retracing to EMA20 in bearish trend → better SELL entry)
+  // Pullback detection (price retracing to EMA20 = better entry)
   const nearEma20 = Math.abs(currentPrice - ema20) / currentPrice < 0.0015;
-  const pullbackSell = bearishTrend && nearEma20 && !lastCandleBullish; // price tagged EMA20, bearish rejection
-  const pullbackBuy  = bullishTrend && nearEma20 &&  lastCandleBullish; // price tagged EMA20, bullish bounce
+  const pullbackSell = isBearishTrend && nearEma20 && !lastCandleBullish;
+  const pullbackBuy  = isBullishTrend && nearEma20 &&  lastCandleBullish;
+
+  // Smart Trend strength → confidence adjustment.
+  //   STRONG → +20  |  WEAK → -10  |  RANGE → -25
+  const strengthDelta = (() => {
+    if (isSidewaysTrend) return -25;
+    return trendStrength === "STRONG" ? 20 : -10;
+  })();
+
+  // SIDEWAYS — early-out, only RSI extremes already handled above. Anything
+  // that fell through to here in a sideways tape stays HOLD.
+  if (isSidewaysTrend) {
+    return makeHold(currentPrice, atr, "NEUTRAL", marketMode, timeframe, indicators, 25 + strengthDelta);
+  }
 
   // ── 6. BEARISH TREND LOGIC ───────────────────────────────────────────────
-  if (bearishTrend) {
+  if (isBearishTrend) {
 
-    // ── 6a. TREND-FOLLOWING SELL ────────────────────────────────────────
-    // RSI is NOT a blocker. MACD alignment is the primary gate.
-    // Candle confirmation upgrades confidence but is not required.
-    if (macdBearish) {
-      let conf = 62; // base: trend + MACD aligned
-      conf += 20;    // trend alignment bonus
-      if (!lastCandleBullish && breaksPrevLow) conf += 12; // candle breaks low = strong confirmation
-      else if (!lastCandleBullish)             conf += 5;  // bearish candle alone = mild confirmation
-      if (pullbackSell)  conf += 15; // price retraced to EMA20 → better entry
-      if (macdBearCross) conf += 10; // fresh MACD cross → strong momentum
+    // SELL ALLOWED IF: STRONG bearish, OR (WEAK bearish AND price near EMA20).
+    // WEAK bearish away from EMA20 = no chase → HOLD.
+    const sellAllowed =
+      trendStrength === "STRONG" || (trendStrength === "WEAK" && nearEma20);
+
+    if (macdBearish && sellAllowed) {
+      let conf = 62;                                      // base
+      conf += strengthDelta;                              // STRONG +20 / WEAK -10
+      if (!lastCandleBullish && breaksPrevLow) conf += 12;
+      else if (!lastCandleBullish)             conf += 5;
+      if (pullbackSell)  conf += 15;
+      if (macdBearCross) conf += 10;
       if (atrRising)     conf += 5;
       if (priceActionBias === "BEARISH") conf += 5;
-      const label = pullbackSell ? "PULLBACK SELL" : "TREND FOLLOWING SELL";
+      const label =
+        trendStrength === "WEAK" ? "WEAK BEARISH PULLBACK SELL" :
+        pullbackSell             ? "PULLBACK SELL" :
+                                   "TREND FOLLOWING SELL";
       return makeSell(currentPrice, atr, conf, marketMode, timeframe, indicators, label);
     }
 
-    // ── 6b. COUNTER-TREND REVERSAL BUY (only with strong confirmation) ──
+    // ── COUNTER-TREND REVERSAL BUY — needs strong reversal signal ────────
     const macdTurningBullish = macdBullCross || (prevMacdHistogram < 0 && macdHistogram > prevMacdHistogram * 0.5);
     if (rsi < 30 && macdTurningBullish) {
       let conf = 55;
       conf += Math.round((30 - rsi) * 1.5);
-      if (lastCandleBullish && breaksPrevHigh) conf += 12; // strong candle = more confident
+      if (lastCandleBullish && breaksPrevHigh) conf += 12;
       else if (lastCandleBullish)              conf += 5;
       if (macdBullCross) conf += 10;
+      // Reversal vs WEAK bearish has a stronger case (trend already faltering)
+      if (trendStrength === "WEAK") conf += 5;
       return makeBuy(currentPrice, atr, Math.min(78, conf), marketMode, timeframe, indicators, "REVERSAL BUY");
     }
 
-    return makeHold(currentPrice, atr, "BEARISH", marketMode, timeframe, indicators, 32);
+    // WEAK bearish + no pullback OR no MACD = HOLD (do not chase)
+    return makeHold(currentPrice, atr, "BEARISH", marketMode, timeframe, indicators, 32 + strengthDelta);
   }
 
   // ── 7. BULLISH TREND LOGIC ───────────────────────────────────────────────
-  if (bullishTrend) {
+  if (isBullishTrend) {
 
-    // ── 7a. TREND-FOLLOWING BUY ─────────────────────────────────────────
-    // MACD alignment is the primary gate; candle confirmation boosts confidence.
-    if (macdBullish) {
+    // BUY ALLOWED IF: STRONG bullish, OR (WEAK bullish AND price near EMA20).
+    const buyAllowed =
+      trendStrength === "STRONG" || (trendStrength === "WEAK" && nearEma20);
+
+    if (macdBullish && buyAllowed) {
       let conf = 62;
-      conf += 20; // trend alignment bonus
+      conf += strengthDelta;
       if (lastCandleBullish && breaksPrevHigh) conf += 12;
       else if (lastCandleBullish)              conf += 5;
       if (pullbackBuy)   conf += 15;
       if (macdBullCross) conf += 10;
       if (atrRising)     conf += 5;
       if (priceActionBias === "BULLISH") conf += 5;
-      const label = pullbackBuy ? "PULLBACK BUY" : "TREND FOLLOWING BUY";
+      const label =
+        trendStrength === "WEAK" ? "WEAK BULLISH PULLBACK BUY" :
+        pullbackBuy              ? "PULLBACK BUY" :
+                                   "TREND FOLLOWING BUY";
       return makeBuy(currentPrice, atr, conf, marketMode, timeframe, indicators, label);
     }
 
-    // ── 7b. COUNTER-TREND SELL (bearish reversal in bullish trend) ──────
+    // ── COUNTER-TREND SELL (bearish reversal in bullish trend) ───────────
     if (rsi > 70 && (macdBearCross || macdHistogram < 0)) {
       let conf = 55;
       conf += Math.round((rsi - 70) * 1.5);
       if (!lastCandleBullish && breaksPrevLow) conf += 12;
       else if (!lastCandleBullish)             conf += 5;
       if (macdBearCross) conf += 10;
+      if (trendStrength === "WEAK") conf += 5;
       return makeSell(currentPrice, atr, Math.min(78, conf), marketMode, timeframe, indicators, "REVERSAL SELL");
     }
 
-    return makeHold(currentPrice, atr, "BULLISH", marketMode, timeframe, indicators, 32);
+    return makeHold(currentPrice, atr, "BULLISH", marketMode, timeframe, indicators, 32 + strengthDelta);
   }
 
   // ── 8. No clear trend ────────────────────────────────────────────────────
@@ -1220,6 +1371,12 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       exhausted: false,
       reversalWatchSide: null,
       marketState: "TRENDING",
+      trendDirection: "SIDEWAYS",
+      trendStrength: "RANGE",
+      swingHigh1: base + 5,
+      swingHigh2: base + 5,
+      swingLow1:  base - 5,
+      swingLow2:  base - 5,
     };
   }
 

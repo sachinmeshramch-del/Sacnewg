@@ -55,6 +55,7 @@ export * from "./scalperSignalResponseSignal";
 export * from "./scalperSignalResponseSignalStatus";
 export * from "./scalperSignalResponseSignalType";
 export * from "./scalperSignalResponseTrend";
+export * from "./scalperSignalResponseTrendStrength";
 export * from "./smcConfidenceBreakdown";
 export * from "./smcHistoryItem";
 export * from "./smcHistoryItemOutcome";

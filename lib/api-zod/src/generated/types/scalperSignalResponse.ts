@@ -15,6 +15,7 @@ import type { ScalperSignalResponseSignal } from "./scalperSignalResponseSignal"
 import type { ScalperSignalResponseSignalStatus } from "./scalperSignalResponseSignalStatus";
 import type { ScalperSignalResponseSignalType } from "./scalperSignalResponseSignalType";
 import type { ScalperSignalResponseTrend } from "./scalperSignalResponseTrend";
+import type { ScalperSignalResponseTrendStrength } from "./scalperSignalResponseTrendStrength";
 
 export interface ScalperSignalResponse {
   /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming. */
@@ -24,6 +25,8 @@ export interface ScalperSignalResponse {
   stopLoss: number;
   takeProfit: number;
   trend: ScalperSignalResponseTrend;
+  /** Smart Trend Engine quality grade — STRONG = EMA + structure aligned (HH/HL or LL/LH); WEAK = EMA bias only; RANGE = sideways. */
+  trendStrength?: ScalperSignalResponseTrendStrength;
   marketMode: ScalperSignalResponseMarketMode;
   /** Human-readable label for the signal type (e.g. TREND FOLLOWING SELL, REVERSAL BUY) */
   signalLabel?: string;

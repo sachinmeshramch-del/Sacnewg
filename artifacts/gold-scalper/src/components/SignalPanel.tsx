@@ -105,6 +105,28 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
     return <MinusIcon className="text-warning" />;
   };
 
+  // Smart Trend Engine — fuse direction + strength into a single label.
+  const getSmartTrendLabel = (trend?: string, strength?: string) => {
+    if (!trend || trend === "NEUTRAL") return strength === "RANGE" ? "SIDEWAYS" : "NEUTRAL";
+    if (strength === "STRONG") return `STRONG ${trend}`;
+    if (strength === "WEAK")   return `WEAK ${trend} (Pullback)`;
+    if (strength === "RANGE")  return "SIDEWAYS";
+    return trend;
+  };
+
+  const getSmartTrendColors = (trend?: string, strength?: string) => {
+    if (strength === "RANGE" || trend === "NEUTRAL")
+      return "bg-muted/20 border-border/40 text-muted-foreground";
+    const isStrong = strength === "STRONG";
+    if (trend === "BULLISH") return isStrong
+      ? "bg-success/15 border-success/50 text-success"
+      : "bg-warning/10 border-warning/40 text-warning";
+    if (trend === "BEARISH") return isStrong
+      ? "bg-destructive/15 border-destructive/50 text-destructive"
+      : "bg-warning/10 border-warning/40 text-warning";
+    return "bg-white/5 border-white/10 text-foreground";
+  };
+
   return (
     <Card className="relative overflow-hidden border-white/10 bg-card/80 backdrop-blur-xl">
       {data?.signal === "BUY"  && <div className="absolute top-0 right-0 w-64 h-64 bg-success/10    blur-[100px] pointer-events-none rounded-full" />}
@@ -344,8 +366,14 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
             <div className="flex items-center justify-between pt-3 border-t border-white/5">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Trend:</span>
-                <Badge variant="outline" className="bg-white/5 text-xs font-semibold gap-1 py-0.5">
-                  {getTrendIcon(data.trend)} {data.trend}
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-xs font-bold gap-1 py-0.5 tracking-wide",
+                    getSmartTrendColors(data.trend, data.trendStrength),
+                  )}
+                >
+                  {getTrendIcon(data.trend)} {getSmartTrendLabel(data.trend, data.trendStrength)}
                 </Badge>
               </div>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -325,6 +325,10 @@ components:
         trend:
           type: string
           enum: [BULLISH, BEARISH, NEUTRAL]
+        trendStrength:
+          type: string
+          enum: [STRONG, WEAK, RANGE]
+          description: Smart Trend Engine quality grade — STRONG = EMA + structure aligned (HH/HL or LL/LH); WEAK = EMA bias only; RANGE = sideways.
         marketMode:
           type: string
           enum: [TRENDING, SIDEWAYS]

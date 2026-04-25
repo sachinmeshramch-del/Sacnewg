@@ -50,6 +50,18 @@ export const ScalperSignalResponseTrend = {
   NEUTRAL: "NEUTRAL",
 } as const;
 
+/**
+ * Smart Trend Engine quality grade — STRONG = EMA + structure aligned (HH/HL or LL/LH); WEAK = EMA bias only; RANGE = sideways.
+ */
+export type ScalperSignalResponseTrendStrength =
+  (typeof ScalperSignalResponseTrendStrength)[keyof typeof ScalperSignalResponseTrendStrength];
+
+export const ScalperSignalResponseTrendStrength = {
+  STRONG: "STRONG",
+  WEAK: "WEAK",
+  RANGE: "RANGE",
+} as const;
+
 export type ScalperSignalResponseMarketMode =
   (typeof ScalperSignalResponseMarketMode)[keyof typeof ScalperSignalResponseMarketMode];
 
@@ -135,6 +147,8 @@ export interface ScalperSignalResponse {
   stopLoss: number;
   takeProfit: number;
   trend: ScalperSignalResponseTrend;
+  /** Smart Trend Engine quality grade — STRONG = EMA + structure aligned (HH/HL or LL/LH); WEAK = EMA bias only; RANGE = sideways. */
+  trendStrength?: ScalperSignalResponseTrendStrength;
   marketMode: ScalperSignalResponseMarketMode;
   /** Human-readable label for the signal type (e.g. TREND FOLLOWING SELL, REVERSAL BUY) */
   signalLabel?: string;

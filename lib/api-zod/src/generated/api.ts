@@ -46,6 +46,12 @@ export const GetSignalResponse = zod.object({
   stopLoss: zod.number(),
   takeProfit: zod.number(),
   trend: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]),
+  trendStrength: zod
+    .enum(["STRONG", "WEAK", "RANGE"])
+    .optional()
+    .describe(
+      "Smart Trend Engine quality grade — STRONG = EMA + structure aligned (HH\/HL or LL\/LH); WEAK = EMA bias only; RANGE = sideways.",
+    ),
   marketMode: zod.enum(["TRENDING", "SIDEWAYS"]),
   signalLabel: zod
     .string()
