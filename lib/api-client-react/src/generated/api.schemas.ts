@@ -105,7 +105,7 @@ export const ScalperSignalResponseHigherTrend = {
 } as const;
 
 /**
- * WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict.
+ * WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict; SETUP_FORMING = higher TF trending while entry TF is in a matching pullback.
  */
 export type ScalperSignalResponseMtfStatus =
   (typeof ScalperSignalResponseMtfStatus)[keyof typeof ScalperSignalResponseMtfStatus];
@@ -114,6 +114,7 @@ export const ScalperSignalResponseMtfStatus = {
   WAITING: "WAITING",
   ALIGNED: "ALIGNED",
   BLOCKED: "BLOCKED",
+  SETUP_FORMING: "SETUP_FORMING",
 } as const;
 
 /**
@@ -162,6 +163,30 @@ export const ScalperSignalResponsePullbackConfirmation = {
   REJECTION_DETECTED: "REJECTION_DETECTED",
 } as const;
 
+/**
+ * Pullback State Detector — BULLISH_PULLBACK = price retracing inside a bullish trend (between EMA50 and EMA20); BEARISH_PULLBACK = mirror for bearish; NONE = no active pullback.
+ */
+export type ScalperSignalResponsePullbackState =
+  (typeof ScalperSignalResponsePullbackState)[keyof typeof ScalperSignalResponsePullbackState];
+
+export const ScalperSignalResponsePullbackState = {
+  BULLISH_PULLBACK: "BULLISH_PULLBACK",
+  BEARISH_PULLBACK: "BEARISH_PULLBACK",
+  NONE: "NONE",
+} as const;
+
+/**
+ * Trend Memory — directional bias from net price move over the last 5–10 candles. Overrides SIDEWAYS classification when the recent move is strong, preventing false sideways during pullbacks.
+ */
+export type ScalperSignalResponseMomentumBias =
+  (typeof ScalperSignalResponseMomentumBias)[keyof typeof ScalperSignalResponseMomentumBias];
+
+export const ScalperSignalResponseMomentumBias = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
 export interface ScalperSignalResponse {
   /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming. */
   signal: ScalperSignalResponseSignal;
@@ -187,7 +212,7 @@ export interface ScalperSignalResponse {
   signalType?: ScalperSignalResponseSignalType;
   /** 15m higher-timeframe trend direction used for MTF confirmation. */
   higherTrend?: ScalperSignalResponseHigherTrend;
-  /** WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict. */
+  /** WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict; SETUP_FORMING = higher TF trending while entry TF is in a matching pullback. */
   mtfStatus?: ScalperSignalResponseMtfStatus;
   /** EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65. */
   entryQuality?: ScalperSignalResponseEntryQuality;
@@ -199,6 +224,12 @@ export interface ScalperSignalResponse {
   zoneStatus?: ScalperSignalResponseZoneStatus;
   /** Pullback Entry Engine — REJECTION_DETECTED when a rejection candle (wick ≥ 1.5× body in the entry direction) prints inside the zone. */
   pullbackConfirmation?: ScalperSignalResponsePullbackConfirmation;
+  /** Pullback State Detector — BULLISH_PULLBACK = price retracing inside a bullish trend (between EMA50 and EMA20); BEARISH_PULLBACK = mirror for bearish; NONE = no active pullback. */
+  pullbackState?: ScalperSignalResponsePullbackState;
+  /** Trend Memory — directional bias from net price move over the last 5–10 candles. Overrides SIDEWAYS classification when the recent move is strong, preventing false sideways during pullbacks. */
+  momentumBias?: ScalperSignalResponseMomentumBias;
+  /** Trend Memory — signed momentum score = (close[t] − close[t−8]) / (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias. */
+  momentumScore?: number;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: string;

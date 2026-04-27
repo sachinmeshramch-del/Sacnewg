@@ -94,10 +94,10 @@ export const GetSignalResponse = zod.object({
       "15m higher-timeframe trend direction used for MTF confirmation.",
     ),
   mtfStatus: zod
-    .enum(["WAITING", "ALIGNED", "BLOCKED"])
+    .enum(["WAITING", "ALIGNED", "BLOCKED", "SETUP_FORMING"])
     .optional()
     .describe(
-      "WAITING = HOLD\/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict.",
+      "WAITING = HOLD\/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict; SETUP_FORMING = higher TF trending while entry TF is in a matching pullback.",
     ),
   entryQuality: zod
     .enum(["EARLY", "CONFIRMED"])
@@ -128,6 +128,24 @@ export const GetSignalResponse = zod.object({
     .optional()
     .describe(
       "Pullback Entry Engine — REJECTION_DETECTED when a rejection candle (wick ≥ 1.5× body in the entry direction) prints inside the zone.",
+    ),
+  pullbackState: zod
+    .enum(["BULLISH_PULLBACK", "BEARISH_PULLBACK", "NONE"])
+    .optional()
+    .describe(
+      "Pullback State Detector — BULLISH_PULLBACK = price retracing inside a bullish trend (between EMA50 and EMA20); BEARISH_PULLBACK = mirror for bearish; NONE = no active pullback.",
+    ),
+  momentumBias: zod
+    .enum(["BULLISH", "BEARISH", "NEUTRAL"])
+    .optional()
+    .describe(
+      "Trend Memory — directional bias from net price move over the last 5–10 candles. Overrides SIDEWAYS classification when the recent move is strong, preventing false sideways during pullbacks.",
+    ),
+  momentumScore: zod
+    .number()
+    .optional()
+    .describe(
+      "Trend Memory — signed momentum score = (close[t] − close[t−8]) \/ (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias.",
     ),
   timeframe: zod.string(),
   indicators: zod.object({

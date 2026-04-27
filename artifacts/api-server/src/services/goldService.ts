@@ -46,12 +46,17 @@ interface SignalResult {
   signalStatus?: "PENDING" | "CONFIRMED";
   signalType?: "TREND" | "REVERSAL";
   higherTrend?: "BULLISH" | "BEARISH" | "NEUTRAL";
-  mtfStatus?: "WAITING" | "ALIGNED" | "BLOCKED";
+  mtfStatus?: "WAITING" | "ALIGNED" | "BLOCKED" | "SETUP_FORMING";
   entryQuality?: "EARLY" | "CONFIRMED";
   marketState?: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH";
   blockReason?: string;
   zoneStatus?: "BUY_ZONE" | "SELL_ZONE" | "NO_ZONE";
   pullbackConfirmation?: "WAITING" | "REJECTION_DETECTED";
+  // Pullback State Detector — separate from zoneStatus; based on EMA20/EMA50 position.
+  pullbackState?: "BULLISH_PULLBACK" | "BEARISH_PULLBACK" | "NONE";
+  // Trend Memory — momentum bias from net price move over the last 5–10 candles.
+  momentumBias?: "BULLISH" | "BEARISH" | "NEUTRAL";
+  momentumScore?: number; // signed; |score| ≥ 0.6 = strong recent move
   timeframe: string;
   indicators: Indicators;
   timestamp: string;
@@ -340,6 +345,14 @@ interface ExtendedIndicators extends Indicators {
   pullbackRange: number;                                    // ATR*0.5, clamped 3..6 pts
   zoneStatus: "BUY_ZONE" | "SELL_ZONE" | "NO_ZONE";
   pullbackConfirmation: "WAITING" | "REJECTION_DETECTED";
+  // Pullback State — based on EMA20/EMA50 position relative to current price.
+  // Independent of zoneStatus (which can fire on either retracement or near-EMA20).
+  pullbackState: "BULLISH_PULLBACK" | "BEARISH_PULLBACK" | "NONE";
+  // Trend Memory — net price impulse over the last 5–10 candles, signed,
+  // normalised by ATR. |score| ≥ 0.6 = strong recent move that overrides a
+  // SIDEWAYS classification (prevents false sideways during pullbacks).
+  momentumBias: "BULLISH" | "BEARISH" | "NEUTRAL";
+  momentumScore: number;
 }
 
 const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
@@ -350,6 +363,28 @@ const MIN_BODY_PCT       = 0.0003;       // body at least 0.03% of price (skip d
 const SWING_PIVOT_K              = 2;    // candle is a pivot if higher/lower than K bars on each side
 const SWING_LOOKBACK             = 30;   // scan last 30 candles for pivots
 const EMA_NEUTRAL_SEPARATION_PCT = 0.0008; // EMAs within 0.08% → SIDEWAYS bias
+
+// ── Strict-Sideways Detection constants ─────────────────────────────────────
+// Sideways now requires ALL three: flat EMA20, flat EMA50, AND a tight price
+// range. Otherwise the market is TRENDING (even on light EMA separation).
+const SIDEWAYS_EMA_SLOPE_PCT     = 0.0005; // EMA slope < 0.05% over the lookback = "flat"
+const SIDEWAYS_SLOPE_LOOKBACK    = 5;      // measure slope across last 5 closed bars
+const SIDEWAYS_RANGE_LOOKBACK    = 10;     // recent price range = max(highs) − min(lows) of last 10 bars
+const SIDEWAYS_RANGE_ATR_MULT    = 2.0;    // tight range = recent range < ATR × 2
+
+// ── Trend Memory (Momentum) constants ───────────────────────────────────────
+// Net price move over last N candles, normalised by ATR. Strong recent moves
+// keep a directional bias even if EMAs flatten — kills "false SIDEWAYS during
+// pullbacks" by giving the trend a memory window.
+const MOMENTUM_LOOKBACK          = 8;      // 5–10 candles, mid value
+const MOMENTUM_ATR_DIVISOR       = 1.5;    // score = netMove / (ATR × 1.5)
+const MOMENTUM_BIAS_THRESHOLD    = 0.6;    // |score| ≥ 0.6 → directional bias
+
+// ── Pullback Zone (expanded) constants ──────────────────────────────────────
+// Zone is now active on EITHER price-near-EMA20 OR a 30–50% retracement of
+// the most recent confirmed swing leg.
+const RETRACEMENT_MIN            = 0.30;
+const RETRACEMENT_MAX            = 0.50;
 
 // ── Trade-quality filter constants ───────────────────────────────────────────
 const PRICE_DENSITY_RANGE_PTS    = 8;    // anti-stacking: same dir within 8pts → block
@@ -436,6 +471,75 @@ interface SmartTrend {
   swingLow2:  number;
 }
 
+/** Strict sideways: ALL three must hold — flat EMA20, flat EMA50, tight range. */
+function isStrictSideways(
+  ema20Arr: number[], ema50Arr: number[],
+  highs: number[], lows: number[], atr: number,
+): boolean {
+  if (ema20Arr.length < SIDEWAYS_SLOPE_LOOKBACK + 1) return false;
+  if (ema50Arr.length < SIDEWAYS_SLOPE_LOOKBACK + 1) return false;
+  const e20Last = ema20Arr[ema20Arr.length - 1];
+  const e20Prev = ema20Arr[ema20Arr.length - 1 - SIDEWAYS_SLOPE_LOOKBACK];
+  const e50Last = ema50Arr[ema50Arr.length - 1];
+  const e50Prev = ema50Arr[ema50Arr.length - 1 - SIDEWAYS_SLOPE_LOOKBACK];
+  const e20Slope = Math.abs(e20Last - e20Prev) / Math.max(e20Last, 1e-6);
+  const e50Slope = Math.abs(e50Last - e50Prev) / Math.max(e50Last, 1e-6);
+  const ema20Flat = e20Slope < SIDEWAYS_EMA_SLOPE_PCT;
+  const ema50Flat = e50Slope < SIDEWAYS_EMA_SLOPE_PCT;
+  if (!ema20Flat || !ema50Flat) return false;
+
+  const recentHighs = highs.slice(-SIDEWAYS_RANGE_LOOKBACK).filter(x => x > 0);
+  const recentLows  = lows.slice(-SIDEWAYS_RANGE_LOOKBACK).filter(x => x > 0);
+  if (!recentHighs.length || !recentLows.length) return false;
+  const range = Math.max(...recentHighs) - Math.min(...recentLows);
+  return range < atr * SIDEWAYS_RANGE_ATR_MULT;
+}
+
+/** Momentum bias from net close-to-close move over the last N candles. */
+function calcMomentum(closes: number[], atr: number): {
+  bias: "BULLISH" | "BEARISH" | "NEUTRAL"; score: number;
+} {
+  if (closes.length < MOMENTUM_LOOKBACK + 1 || atr <= 0) {
+    return { bias: "NEUTRAL", score: 0 };
+  }
+  const last = closes[closes.length - 1];
+  const ref  = closes[closes.length - 1 - MOMENTUM_LOOKBACK];
+  if (!(last > 0) || !(ref > 0)) return { bias: "NEUTRAL", score: 0 };
+  const net   = last - ref;
+  const score = net / (atr * MOMENTUM_ATR_DIVISOR);
+  const bias: "BULLISH" | "BEARISH" | "NEUTRAL" =
+    score >=  MOMENTUM_BIAS_THRESHOLD ? "BULLISH" :
+    score <= -MOMENTUM_BIAS_THRESHOLD ? "BEARISH" : "NEUTRAL";
+  return { bias, score };
+}
+
+/**
+ * Pullback Zone (expanded): zone is active when price is either near EMA20
+ * (existing rule) OR retraced 30–50% of the most recent swing leg.
+ * Direction-aware: BUY zone uses swingHigh→price retrace from the high,
+ * SELL zone uses price→swingLow bounce off the low.
+ */
+function inExpandedPullbackZone(
+  side: "BUY" | "SELL",
+  price: number, ema20: number, atr: number,
+  swingHigh: number, swingLow: number,
+  pullbackRange: number,
+): { active: boolean; via: "NEAR_EMA" | "RETRACEMENT" | "NONE" } {
+  const nearEma20 = Math.abs(price - ema20) <= pullbackRange;
+  if (nearEma20) return { active: true, via: "NEAR_EMA" };
+
+  const range = Math.max(0, swingHigh - swingLow);
+  if (range <= atr * 0.25) return { active: false, via: "NONE" }; // swing too small to mean anything
+
+  const retrace = side === "BUY"
+    ? (swingHigh - price) / range   // BULLISH pullback from the high
+    : (price - swingLow)  / range;  // BEARISH bounce from the low
+  if (retrace >= RETRACEMENT_MIN && retrace <= RETRACEMENT_MAX) {
+    return { active: true, via: "RETRACEMENT" };
+  }
+  return { active: false, via: "NONE" };
+}
+
 /**
  * Smart Trend Engine — combines EMA bias with market structure.
  *
@@ -446,50 +550,61 @@ interface SmartTrend {
  *   SIDEWAYS       = EMAs hugging or no structural conviction
  */
 function classifySmartTrend(
-  ema20: number, ema50: number, currentPrice: number,
-  highs: number[], lows: number[],
+  ema20Arr: number[], ema50Arr: number[], currentPrice: number,
+  highs: number[], lows: number[], atr: number,
+  momentumBias: "BULLISH" | "BEARISH" | "NEUTRAL",
 ): SmartTrend {
+  const ema20 = ema20Arr[ema20Arr.length - 1];
+  const ema50 = ema50Arr[ema50Arr.length - 1];
+
   const { swingHighs, swingLows } = findSwings(highs, lows);
   const lastHigh = swingHighs[0] ?? Math.max(...highs.slice(-5).filter(x => x > 0), 0);
   const prevHigh = swingHighs[1] ?? lastHigh;
   const lastLow  = swingLows[0]  ?? Math.min(...lows.slice(-5).filter(x => x > 0),  Number.POSITIVE_INFINITY);
   const prevLow  = swingLows[1]  ?? lastLow;
+  const swings = { swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
 
   const HH = lastHigh > prevHigh;     // higher high
   const LH = lastHigh <= prevHigh;    // lower (or equal) high
   const HL = lastLow  > prevLow;      // higher low
   const LL = lastLow  <= prevLow;     // lower (or equal) low
 
-  const sepPct  = Math.abs(ema20 - ema50) / Math.max(currentPrice, 1e-6);
-  const isFlat  = sepPct < EMA_NEUTRAL_SEPARATION_PCT;
-  const isBull  = ema20 > ema50;
-  const isBear  = ema20 < ema50;
+  const isBull = ema20 > ema50;
+  const isBear = ema20 < ema50;
 
-  // SIDEWAYS — flat EMAs and no clear structural breakout
-  if (isFlat && !(HH && HL) && !(LL && LH)) {
-    return { direction: "SIDEWAYS", strength: "RANGE",
-      swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+  // ── STRICT SIDEWAYS ──────────────────────────────────────────────────────
+  // ALL three required: flat EMA20, flat EMA50, AND tight price range. The old
+  // "EMA separation" check was too eager — it labelled trending pullbacks as
+  // sideways. Trend Memory then provides a final escape: a strong recent move
+  // overrides sideways even if the structural rule is met.
+  const strictSideways = isStrictSideways(ema20Arr, ema50Arr, highs, lows, atr);
+
+  if (strictSideways) {
+    // Trend Memory: a strong recent impulse keeps the directional bias alive
+    // even when EMAs have flattened. Prevents false SIDEWAYS during pullbacks.
+    if (momentumBias === "BULLISH") return { direction: "BULLISH", strength: "WEAK", ...swings };
+    if (momentumBias === "BEARISH") return { direction: "BEARISH", strength: "WEAK", ...swings };
+    return { direction: "SIDEWAYS", strength: "RANGE", ...swings };
   }
 
+  // Not strict sideways → market is TRENDING. Pick a direction.
   if (isBull) {
     const strength: "STRONG" | "WEAK" = (HH && HL) ? "STRONG" : "WEAK";
-    return { direction: "BULLISH", strength,
-      swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+    return { direction: "BULLISH", strength, ...swings };
   }
   if (isBear) {
     const strength: "STRONG" | "WEAK" = (LL && LH) ? "STRONG" : "WEAK";
-    return { direction: "BEARISH", strength,
-      swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+    return { direction: "BEARISH", strength, ...swings };
   }
 
-  // EMAs flat but structure leans one way → emit WEAK directional bias
-  if (HH && HL) return { direction: "BULLISH", strength: "WEAK",
-    swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
-  if (LL && LH) return { direction: "BEARISH", strength: "WEAK",
-    swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+  // EMAs equal — fall back to structure / momentum
+  if (HH && HL) return { direction: "BULLISH", strength: "WEAK", ...swings };
+  if (LL && LH) return { direction: "BEARISH", strength: "WEAK", ...swings };
+  if (momentumBias === "BULLISH") return { direction: "BULLISH", strength: "WEAK", ...swings };
+  if (momentumBias === "BEARISH") return { direction: "BEARISH", strength: "WEAK", ...swings };
 
-  return { direction: "SIDEWAYS", strength: "RANGE",
-    swingHigh1: lastHigh, swingHigh2: prevHigh, swingLow1: lastLow, swingLow2: prevLow };
+  // Fully ambiguous → SIDEWAYS RANGE (rare in practice if not strictSideways)
+  return { direction: "SIDEWAYS", strength: "RANGE", ...swings };
 }
 
 function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicators {
@@ -591,18 +706,39 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     reversalWatchSide     ? "REVERSAL_WATCH" :
                             "TRENDING";
 
-  // ── Smart Trend Engine — EMA + structure (HH/HL/LH/LL) ────────────────────
-  const smart = classifySmartTrend(ema20, ema50, lastClose, highs, lows);
+  // ── Trend Memory — momentum bias from last 5–10 candles ──────────────────
+  const momentum = calcMomentum(closes, atr);
+
+  // ── Smart Trend Engine — EMA + structure (HH/HL/LH/LL) + momentum memory ─
+  const smart = classifySmartTrend(ema20arr, ema50arr, lastClose, highs, lows, atr, momentum.bias);
+
+  // ── Pullback State — based on EMA20 / EMA50 position relative to price.
+  // Independent of zoneStatus. Says "we're inside an active pullback in a
+  // confirmed trend" — used by MTF "SETUP FORMING" detection.
+  let pullbackState: "BULLISH_PULLBACK" | "BEARISH_PULLBACK" | "NONE" = "NONE";
+  if (smart.direction === "BULLISH" && lastClose < ema20 && lastClose > ema50) {
+    pullbackState = "BULLISH_PULLBACK";
+  } else if (smart.direction === "BEARISH" && lastClose > ema20 && lastClose < ema50) {
+    pullbackState = "BEARISH_PULLBACK";
+  }
 
   // ── Pullback Entry Engine — zone + rejection candle ──────────────────────
   // Zone width = ATR*0.5, clamped to 3..6 points (gold pip scale).
   const pullbackRange = Math.min(6, Math.max(3, atr * 0.5));
-  const distFromEma20 = Math.abs(lastClose - ema20);
 
+  // Expanded zone activation — fires if EITHER price is near EMA20 OR price
+  // has retraced 30–50 % of the most recent confirmed swing leg. Direction is
+  // inferred from the smart trend; both STRONG and WEAK qualify so the UI can
+  // display zone status during full-strength trend pullbacks too.
   let zoneStatus: "BUY_ZONE" | "SELL_ZONE" | "NO_ZONE" = "NO_ZONE";
-  if (distFromEma20 <= pullbackRange) {
-    if (smart.direction === "BULLISH" && smart.strength === "WEAK")  zoneStatus = "BUY_ZONE";
-    if (smart.direction === "BEARISH" && smart.strength === "WEAK")  zoneStatus = "SELL_ZONE";
+  if (smart.direction === "BULLISH") {
+    const z = inExpandedPullbackZone("BUY", lastClose, ema20, atr,
+      smart.swingHigh1, smart.swingLow1, pullbackRange);
+    if (z.active) zoneStatus = "BUY_ZONE";
+  } else if (smart.direction === "BEARISH") {
+    const z = inExpandedPullbackZone("SELL", lastClose, ema20, atr,
+      smart.swingHigh1, smart.swingLow1, pullbackRange);
+    if (z.active) zoneStatus = "SELL_ZONE";
   }
 
   // Rejection candle: requires a real body (skip dojis) and matching wick/close.
@@ -629,6 +765,9 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     pullbackRange,
     zoneStatus,
     pullbackConfirmation,
+    pullbackState,
+    momentumBias:   momentum.bias,
+    momentumScore:  momentum.score,
   };
 }
 
@@ -801,8 +940,13 @@ function generateSignal(
   const atrRising = prevAtr > 0 && atr > prevAtr * 1.02;
 
   // ── 2. Market Mode Detection ─────────────────────────────────────────────
-  const emaSeparationPct = Math.abs(ema20 - ema50) / currentPrice;
-  const marketMode: "TRENDING" | "SIDEWAYS" = emaSeparationPct < 0.0008 ? "SIDEWAYS" : "TRENDING";
+  // Strict sideways: require ALL of flat EMA20, flat EMA50, AND tight range.
+  // The Smart Trend Engine already applied this rule when classifying the
+  // trend, so reuse its output to keep both layers consistent. Trend Memory
+  // (momentumBias) takes precedence — if there's a strong recent move,
+  // marketMode stays TRENDING even if EMAs look flat.
+  const marketMode: "TRENDING" | "SIDEWAYS" =
+    trendDirection === "SIDEWAYS" ? "SIDEWAYS" : "TRENDING";
 
   // ── 2.5 TRAP / STOP HUNT (HIGHEST PRIORITY) ──────────────────────────────
   // Liquidity grabs and fake breakouts override normal indicator logic — they
@@ -1005,6 +1149,7 @@ function applyMtfConfirmation(
   raw: Omit<SignalResult, "timestamp">,
   higherTrend: HigherTrend,
   timeframe: string,
+  indicators: ExtendedIndicators,
 ): Omit<SignalResult, "timestamp"> {
   // 15m feed itself just gets the trend tag for UI; no MTF rules applied.
   if (timeframe === "15m") {
@@ -1015,6 +1160,26 @@ function applyMtfConfirmation(
   const trendDir: "BUY" | "SELL" | null =
     higherTrend === "BULLISH" ? "BUY" :
     higherTrend === "BEARISH" ? "SELL" : null;
+
+  // ── SETUP FORMING: higher TF trending + lower TF in matching pullback ────
+  // The entry TF hasn't fired yet (still HOLD or SETUP), but the pullback
+  // state on the entry TF lines up with the higher-TF direction → flag the
+  // setup so the user knows a trade is brewing, not that the market is dead.
+  const lowerInBullPullback = indicators.pullbackState === "BULLISH_PULLBACK";
+  const lowerInBearPullback = indicators.pullbackState === "BEARISH_PULLBACK";
+  const setupFormingDir: "BUY" | "SELL" | null =
+    higherTrend === "BULLISH" && lowerInBullPullback ? "BUY"  :
+    higherTrend === "BEARISH" && lowerInBearPullback ? "SELL" : null;
+
+  if (setupFormingDir && (raw.signal === "HOLD" || raw.signal === "SETUP")) {
+    return {
+      ...raw,
+      signal: "SETUP",
+      higherTrend,
+      mtfStatus: "SETUP_FORMING",
+      signalLabel: `SETUP FORMING — ${higherTrend} pullback on ${timeframe}`,
+    };
+  }
 
   // ── Early Trend Entry: raw HOLD + clear trend + conf ≥ 60 → directional ──
   // Catches strong trending moves before the entry TF fully aligns.
@@ -1198,13 +1363,22 @@ function applyFilters(
     }
   }
 
-  // ── 7. Pullback zone — for trend continuation only, require entry near EMA20.
-  //       Reversal & trap signals are exempt (entries happen at extremes).
+  // ── 7. Pullback zone — for trend continuation only, require entry near EMA20
+  //       OR a 30–50% retracement of the most recent swing leg (Trend Memory
+  //       lets us still take valid trend continuations that aren't hugging
+  //       EMA20). Reversal & trap signals are exempt (entries happen at
+  //       extremes).
   if (!isReversalSignal && !isTrapSignal) {
-    const distFromEma = Math.abs(currentPrice - ema20);
-    if (distFromEma > atr * PULLBACK_ATR_MULT) {
+    const side = raw.signal as "BUY" | "SELL";
+    const pullbackRange = indicators.pullbackRange;
+    const z = inExpandedPullbackZone(
+      side, currentPrice, ema20, atr,
+      indicators.swingHigh1, indicators.swingLow1, pullbackRange,
+    );
+    if (!z.active) {
       pendingSignal[timeframe] = null;
-      return makeBlocked(raw, baseMarketState, "Not in pullback zone (too far from EMA20)");
+      return makeBlocked(raw, baseMarketState,
+        "Not in pullback zone (too far from EMA20, no 30–50% retrace)");
     }
   }
 
@@ -1484,6 +1658,9 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       pullbackRange: Math.min(6, Math.max(3, atr * 0.5)),
       zoneStatus: "NO_ZONE",
       pullbackConfirmation: "WAITING",
+      pullbackState: "NONE",
+      momentumBias: "NEUTRAL",
+      momentumScore: 0,
     };
   }
 
@@ -1501,7 +1678,7 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     Math.floor(Date.now() / (is1m ? 60_000 : 300_000));
 
   const rawResult      = generateSignal(indicators, currentPrice, timeframe);
-  const mtfAdjusted    = applyMtfConfirmation(rawResult, higherTrend, timeframe);
+  const mtfAdjusted    = applyMtfConfirmation(rawResult, higherTrend, timeframe, indicators);
   const filteredResult = applyFilters(mtfAdjusted, tfKey, currentPrice, lastCandleTs, indicators);
 
   // Record a confirmed signal — starts the 3-min cooldown AND opens the
@@ -1528,6 +1705,11 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     // final signal (HOLD, SETUP, BUY/SELL, blocked, etc.).
     zoneStatus: filteredResult.zoneStatus ?? indicators.zoneStatus,
     pullbackConfirmation: filteredResult.pullbackConfirmation ?? indicators.pullbackConfirmation,
+    // Surface Pullback State + Trend Memory so the UI can render the new
+    // BULLISH_PULLBACK / BEARISH_PULLBACK badges and momentum bias.
+    pullbackState: filteredResult.pullbackState ?? indicators.pullbackState,
+    momentumBias:  filteredResult.momentumBias  ?? indicators.momentumBias,
+    momentumScore: filteredResult.momentumScore ?? indicators.momentumScore,
     timestamp: new Date().toISOString(),
   };
 
@@ -1550,6 +1732,8 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
 
 // ── History ────────────────────────────────────────────────────────────────────
 function addToHistory(signal: SignalResult) {
+  // History only stores tradable BUY/SELL/HOLD outcomes — SETUP is informational.
+  if (signal.signal === "SETUP") return;
   const item: HistoryItem = {
     id: historyIdCounter++,
     signal: signal.signal,

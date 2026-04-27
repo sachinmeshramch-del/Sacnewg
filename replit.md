@@ -99,6 +99,15 @@ React + Vite web app at `/` (port 23682). Gold Scalper AI — 5-15 minute scalpi
 
 **Risk / Reward Engine** (`computeRiskTargets()` in `goldService.ts`): single source of truth for SL/TP across every directional signal (`makeBuy`, `makeSell`, `tryPullbackEntry`). SL is fixed at `entry ∓ ATR × 1.0` (= 1R risk). TP1 = `entry ± risk × 1.2` (partial profit). TP2 = `entry ± risk × 2.2` (final target); `takeProfit` mirrors TP2 for back-compat. Tunable via the `SL_ATR_MULT` / `TP1_R_MULT` / `TP2_R_MULT` constants. The signal panel shows Entry / SL / TP1 / TP2 in a 4-cell grid with R-multiple labels.
 
+**Trend Memory + Strict Sideways + Pullback States** (`goldService.ts`): four coordinated pieces that fix false sideways labels during pullbacks.
+- **Trend Memory** (`calcMomentum()`): signed momentum score = `(close[t] − close[t−8]) / (ATR × 1.5)`. `|score| ≥ 0.6` produces `momentumBias = BULLISH` / `BEARISH`. Used by `classifySmartTrend` to override a SIDEWAYS label when there's been a strong recent move.
+- **Strict Sideways** (`isStrictSideways()`): SIDEWAYS now requires ALL three — flat EMA20 (slope < 0.05% over 5 bars), flat EMA50, AND recent 10-bar price range < ATR × 2. Anything else is TRENDING. The old single-rule "EMA separation < 0.08%" check labelled trending pullbacks as sideways.
+- **Pullback State** (`pullbackState`): `BULLISH_PULLBACK` when bullish trend + price between EMA50 and EMA20; mirrored for `BEARISH_PULLBACK`. Independent of zone status.
+- **Expanded Pullback Zone** (`inExpandedPullbackZone()`): zone is active if EITHER price is near EMA20 (existing rule) OR price has retraced 30–50 % of the most recent confirmed swing leg. Used both for `zoneStatus` display and for the `applyFilters` pullback-zone gate, so deep retracements no longer get blocked.
+- **MTF SETUP_FORMING** (`applyMtfConfirmation()`): when higher TF (15m) is trending and the entry TF is in a matching `pullbackState`, signal becomes `SETUP` with `mtfStatus = SETUP_FORMING` and label `SETUP FORMING — <DIR> pullback`. Surfaces "trade brewing" instead of letting the user think the market is dead during a healthy retracement.
+
+UI (`SignalPanel.tsx`) renders new badges: an inline `BULLISH PULLBACK` / `BEARISH PULLBACK` pill, a `SETUP FORMING` MTF status with pulsing dot, and a `Trend Memory` row inside the MTF panel showing the signed momentum score.
+
 ### `artifacts/gold-intraday` (`@workspace/gold-intraday`)
 
 React + Vite web app at `/intraday/` (port 23161). Gold Intraday AI Trader — 1-4 hour intraday signals using EMA20/EMA50, support/resistance, multi-timeframe analysis (15m/30m/1h). No Telegram integration.

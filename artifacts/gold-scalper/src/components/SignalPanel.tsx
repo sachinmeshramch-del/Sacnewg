@@ -247,6 +247,22 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
+              {/* Pullback State — live BULLISH_PULLBACK / BEARISH_PULLBACK detector */}
+              {data.pullbackState && data.pullbackState !== "NONE" && (
+                <div className={cn(
+                  "mt-2 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest border inline-flex items-center gap-1.5 uppercase",
+                  data.pullbackState === "BULLISH_PULLBACK"
+                    ? "border-success/40 bg-success/10 text-success"
+                    : "border-destructive/40 bg-destructive/10 text-destructive"
+                )}>
+                  <span className={cn(
+                    "h-1.5 w-1.5 rounded-full animate-pulse",
+                    data.pullbackState === "BULLISH_PULLBACK" ? "bg-success" : "bg-destructive"
+                  )} />
+                  {data.pullbackState === "BULLISH_PULLBACK" ? "BULLISH PULLBACK" : "BEARISH PULLBACK"}
+                </div>
+              )}
+
               {/* Pullback Entry Engine — zone + rejection live status */}
               {(data.zoneStatus || data.pullbackConfirmation) && (
                 <div className="mt-3 w-full max-w-[260px] mx-auto rounded-md border border-border/40 bg-card/40 px-3 py-2 text-[10px] tracking-wide space-y-1">
@@ -307,11 +323,34 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                     <div className="flex items-center justify-between pt-1 border-t border-border/30">
                       <span className="text-muted-foreground">MTF Status</span>
                       <span className={cn(
-                        "font-bold tracking-widest",
-                        data.mtfStatus === "ALIGNED" && "text-success",
-                        data.mtfStatus === "BLOCKED" && "text-destructive",
-                        data.mtfStatus === "WAITING" && "text-muted-foreground",
-                      )}>{data.mtfStatus}</span>
+                        "font-bold tracking-widest inline-flex items-center gap-1",
+                        data.mtfStatus === "ALIGNED"        && "text-success",
+                        data.mtfStatus === "BLOCKED"        && "text-destructive",
+                        data.mtfStatus === "WAITING"        && "text-muted-foreground",
+                        data.mtfStatus === "SETUP_FORMING"  && "text-primary",
+                      )}>
+                        {data.mtfStatus === "SETUP_FORMING" && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                        )}
+                        {data.mtfStatus === "SETUP_FORMING" ? "SETUP FORMING" : data.mtfStatus}
+                      </span>
+                    </div>
+                  )}
+                  {data.momentumBias && data.momentumBias !== "NEUTRAL" && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Trend Memory</span>
+                      <span className={cn(
+                        "font-bold tracking-widest inline-flex items-center gap-1",
+                        data.momentumBias === "BULLISH" && "text-success",
+                        data.momentumBias === "BEARISH" && "text-destructive",
+                      )}>
+                        {data.momentumBias === "BULLISH" ? "↗" : "↘"} {data.momentumBias}
+                        {typeof data.momentumScore === "number" && (
+                          <span className="text-muted-foreground/70 font-normal">
+                            ({data.momentumScore >= 0 ? "+" : ""}{data.momentumScore.toFixed(2)}R)
+                          </span>
+                        )}
+                      </span>
                     </div>
                   )}
                 </div>

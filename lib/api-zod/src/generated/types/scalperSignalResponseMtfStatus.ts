@@ -7,7 +7,7 @@
  */
 
 /**
- * WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict.
+ * WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict; SETUP_FORMING = higher TF trending while entry TF is in a matching pullback.
  */
 export type ScalperSignalResponseMtfStatus =
   (typeof ScalperSignalResponseMtfStatus)[keyof typeof ScalperSignalResponseMtfStatus];
@@ -16,4 +16,5 @@ export const ScalperSignalResponseMtfStatus = {
   WAITING: "WAITING",
   ALIGNED: "ALIGNED",
   BLOCKED: "BLOCKED",
+  SETUP_FORMING: "SETUP_FORMING",
 } as const;

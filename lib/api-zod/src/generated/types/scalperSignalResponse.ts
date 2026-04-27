@@ -10,8 +10,10 @@ import type { ScalperSignalResponseEntryQuality } from "./scalperSignalResponseE
 import type { ScalperSignalResponseHigherTrend } from "./scalperSignalResponseHigherTrend";
 import type { ScalperSignalResponseMarketMode } from "./scalperSignalResponseMarketMode";
 import type { ScalperSignalResponseMarketState } from "./scalperSignalResponseMarketState";
+import type { ScalperSignalResponseMomentumBias } from "./scalperSignalResponseMomentumBias";
 import type { ScalperSignalResponseMtfStatus } from "./scalperSignalResponseMtfStatus";
 import type { ScalperSignalResponsePullbackConfirmation } from "./scalperSignalResponsePullbackConfirmation";
+import type { ScalperSignalResponsePullbackState } from "./scalperSignalResponsePullbackState";
 import type { ScalperSignalResponseSignal } from "./scalperSignalResponseSignal";
 import type { ScalperSignalResponseSignalStatus } from "./scalperSignalResponseSignalStatus";
 import type { ScalperSignalResponseSignalType } from "./scalperSignalResponseSignalType";
@@ -44,7 +46,7 @@ export interface ScalperSignalResponse {
   signalType?: ScalperSignalResponseSignalType;
   /** 15m higher-timeframe trend direction used for MTF confirmation. */
   higherTrend?: ScalperSignalResponseHigherTrend;
-  /** WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict. */
+  /** WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict; SETUP_FORMING = higher TF trending while entry TF is in a matching pullback. */
   mtfStatus?: ScalperSignalResponseMtfStatus;
   /** EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65. */
   entryQuality?: ScalperSignalResponseEntryQuality;
@@ -56,6 +58,12 @@ export interface ScalperSignalResponse {
   zoneStatus?: ScalperSignalResponseZoneStatus;
   /** Pullback Entry Engine — REJECTION_DETECTED when a rejection candle (wick ≥ 1.5× body in the entry direction) prints inside the zone. */
   pullbackConfirmation?: ScalperSignalResponsePullbackConfirmation;
+  /** Pullback State Detector — BULLISH_PULLBACK = price retracing inside a bullish trend (between EMA50 and EMA20); BEARISH_PULLBACK = mirror for bearish; NONE = no active pullback. */
+  pullbackState?: ScalperSignalResponsePullbackState;
+  /** Trend Memory — directional bias from net price move over the last 5–10 candles. Overrides SIDEWAYS classification when the recent move is strong, preventing false sideways during pullbacks. */
+  momentumBias?: ScalperSignalResponseMomentumBias;
+  /** Trend Memory — signed momentum score = (close[t] − close[t−8]) / (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias. */
+  momentumScore?: number;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: Date;
