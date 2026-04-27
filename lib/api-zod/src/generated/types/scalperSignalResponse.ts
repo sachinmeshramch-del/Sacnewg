@@ -6,12 +6,16 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ScalperIndicators } from "./scalperIndicators";
+import type { ScalperSignalResponseConflictLevel } from "./scalperSignalResponseConflictLevel";
 import type { ScalperSignalResponseEntryQuality } from "./scalperSignalResponseEntryQuality";
 import type { ScalperSignalResponseHigherTrend } from "./scalperSignalResponseHigherTrend";
+import type { ScalperSignalResponseIndicatorBias } from "./scalperSignalResponseIndicatorBias";
 import type { ScalperSignalResponseMarketMode } from "./scalperSignalResponseMarketMode";
+import type { ScalperSignalResponseMarketRegime } from "./scalperSignalResponseMarketRegime";
 import type { ScalperSignalResponseMarketState } from "./scalperSignalResponseMarketState";
 import type { ScalperSignalResponseMomentumBias } from "./scalperSignalResponseMomentumBias";
 import type { ScalperSignalResponseMtfStatus } from "./scalperSignalResponseMtfStatus";
+import type { ScalperSignalResponsePermission } from "./scalperSignalResponsePermission";
 import type { ScalperSignalResponsePullbackConfirmation } from "./scalperSignalResponsePullbackConfirmation";
 import type { ScalperSignalResponsePullbackState } from "./scalperSignalResponsePullbackState";
 import type { ScalperSignalResponseSignal } from "./scalperSignalResponseSignal";
@@ -22,8 +26,22 @@ import type { ScalperSignalResponseTrendStrength } from "./scalperSignalResponse
 import type { ScalperSignalResponseZoneStatus } from "./scalperSignalResponseZoneStatus";
 
 export interface ScalperSignalResponse {
-  /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming. */
+  /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming; CONFLICT = indicators disagree or chop detected, do not trade. */
   signal: ScalperSignalResponseSignal;
+  /** Decision Engine — splits "I see a setup" from "you should trade it". ACTIONABLE/QUALIFIED show trade levels; WATCHLIST/BLOCKED hide them. WATCHLIST = mixed indicators, context only. BLOCKED = severe conflict, chop, or HOLD. */
+  permission?: ScalperSignalResponsePermission;
+  /** Market Regime layer — finer than marketMode. CHOPPY/TRANSITION block trades; TRENDING_* allow them; RANGING permits RSI scalps only. */
+  marketRegime?: ScalperSignalResponseMarketRegime;
+  /** Indicator Conflict Engine — counts agreement across EMA/MACD/RSI/Trend Memory/HTF/Structure. MIXED caps permission at WATCHLIST; SEVERE forces signal=CONFLICT. */
+  conflictLevel?: ScalperSignalResponseConflictLevel;
+  /** Plain-language list of WHY indicators disagree. */
+  conflictReasons?: string[];
+  /** Per-indicator vote breakdown. EMA = trend filter, MACD = momentum confirmation, RSI = timing, Momentum = Trend Memory, HTF = 15m higher trend, Structure = HH/HL vs LL/LH. */
+  indicatorBias?: ScalperSignalResponseIndicatorBias;
+  /** Chop / Volatility filter — 0..1. > 0.6 = consolidation / choppy; setups are blocked. Combines candle direction-flip density and EMA20/EMA50 cross frequency. */
+  chopScore?: number;
+  /** Soft user-facing banner ("Mixed indicators — waiting for structure confirmation", "Choppy market — no scalp setups", etc.). Set by the UI Decision Engine. */
+  bannerMessage?: string;
   confidence: number;
   entry: number;
   /** ATR-based stop. SL = entry ∓ ATR × 1.0 (always 1R away). */

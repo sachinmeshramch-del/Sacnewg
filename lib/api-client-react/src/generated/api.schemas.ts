@@ -29,7 +29,7 @@ export interface ScalperIndicators {
 }
 
 /**
- * BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming.
+ * BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming; CONFLICT = indicators disagree or chop detected, do not trade.
  */
 export type ScalperSignalResponseSignal =
   (typeof ScalperSignalResponseSignal)[keyof typeof ScalperSignalResponseSignal];
@@ -39,7 +39,114 @@ export const ScalperSignalResponseSignal = {
   SELL: "SELL",
   HOLD: "HOLD",
   SETUP: "SETUP",
+  CONFLICT: "CONFLICT",
 } as const;
+
+/**
+ * Decision Engine — splits "I see a setup" from "you should trade it". ACTIONABLE/QUALIFIED show trade levels; WATCHLIST/BLOCKED hide them. WATCHLIST = mixed indicators, context only. BLOCKED = severe conflict, chop, or HOLD.
+ */
+export type ScalperSignalResponsePermission =
+  (typeof ScalperSignalResponsePermission)[keyof typeof ScalperSignalResponsePermission];
+
+export const ScalperSignalResponsePermission = {
+  ACTIONABLE: "ACTIONABLE",
+  QUALIFIED: "QUALIFIED",
+  WATCHLIST: "WATCHLIST",
+  BLOCKED: "BLOCKED",
+} as const;
+
+/**
+ * Market Regime layer — finer than marketMode. CHOPPY/TRANSITION block trades; TRENDING_* allow them; RANGING permits RSI scalps only.
+ */
+export type ScalperSignalResponseMarketRegime =
+  (typeof ScalperSignalResponseMarketRegime)[keyof typeof ScalperSignalResponseMarketRegime];
+
+export const ScalperSignalResponseMarketRegime = {
+  TRENDING_BULL: "TRENDING_BULL",
+  TRENDING_BEAR: "TRENDING_BEAR",
+  RANGING: "RANGING",
+  CHOPPY: "CHOPPY",
+  TRANSITION: "TRANSITION",
+} as const;
+
+/**
+ * Indicator Conflict Engine — counts agreement across EMA/MACD/RSI/Trend Memory/HTF/Structure. MIXED caps permission at WATCHLIST; SEVERE forces signal=CONFLICT.
+ */
+export type ScalperSignalResponseConflictLevel =
+  (typeof ScalperSignalResponseConflictLevel)[keyof typeof ScalperSignalResponseConflictLevel];
+
+export const ScalperSignalResponseConflictLevel = {
+  NONE: "NONE",
+  MINOR: "MINOR",
+  MIXED: "MIXED",
+  SEVERE: "SEVERE",
+} as const;
+
+export type ScalperSignalResponseIndicatorBiasEma =
+  (typeof ScalperSignalResponseIndicatorBiasEma)[keyof typeof ScalperSignalResponseIndicatorBiasEma];
+
+export const ScalperSignalResponseIndicatorBiasEma = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
+export type ScalperSignalResponseIndicatorBiasMacd =
+  (typeof ScalperSignalResponseIndicatorBiasMacd)[keyof typeof ScalperSignalResponseIndicatorBiasMacd];
+
+export const ScalperSignalResponseIndicatorBiasMacd = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
+export type ScalperSignalResponseIndicatorBiasRsi =
+  (typeof ScalperSignalResponseIndicatorBiasRsi)[keyof typeof ScalperSignalResponseIndicatorBiasRsi];
+
+export const ScalperSignalResponseIndicatorBiasRsi = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
+export type ScalperSignalResponseIndicatorBiasMomentum =
+  (typeof ScalperSignalResponseIndicatorBiasMomentum)[keyof typeof ScalperSignalResponseIndicatorBiasMomentum];
+
+export const ScalperSignalResponseIndicatorBiasMomentum = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
+export type ScalperSignalResponseIndicatorBiasHtf =
+  (typeof ScalperSignalResponseIndicatorBiasHtf)[keyof typeof ScalperSignalResponseIndicatorBiasHtf];
+
+export const ScalperSignalResponseIndicatorBiasHtf = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
+export type ScalperSignalResponseIndicatorBiasStructure =
+  (typeof ScalperSignalResponseIndicatorBiasStructure)[keyof typeof ScalperSignalResponseIndicatorBiasStructure];
+
+export const ScalperSignalResponseIndicatorBiasStructure = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
+/**
+ * Per-indicator vote breakdown. EMA = trend filter, MACD = momentum confirmation, RSI = timing, Momentum = Trend Memory, HTF = 15m higher trend, Structure = HH/HL vs LL/LH.
+ */
+export type ScalperSignalResponseIndicatorBias = {
+  ema?: ScalperSignalResponseIndicatorBiasEma;
+  macd?: ScalperSignalResponseIndicatorBiasMacd;
+  rsi?: ScalperSignalResponseIndicatorBiasRsi;
+  momentum?: ScalperSignalResponseIndicatorBiasMomentum;
+  htf?: ScalperSignalResponseIndicatorBiasHtf;
+  structure?: ScalperSignalResponseIndicatorBiasStructure;
+};
 
 export type ScalperSignalResponseTrend =
   (typeof ScalperSignalResponseTrend)[keyof typeof ScalperSignalResponseTrend];
@@ -188,8 +295,22 @@ export const ScalperSignalResponseMomentumBias = {
 } as const;
 
 export interface ScalperSignalResponse {
-  /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming. */
+  /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming; CONFLICT = indicators disagree or chop detected, do not trade. */
   signal: ScalperSignalResponseSignal;
+  /** Decision Engine — splits "I see a setup" from "you should trade it". ACTIONABLE/QUALIFIED show trade levels; WATCHLIST/BLOCKED hide them. WATCHLIST = mixed indicators, context only. BLOCKED = severe conflict, chop, or HOLD. */
+  permission?: ScalperSignalResponsePermission;
+  /** Market Regime layer — finer than marketMode. CHOPPY/TRANSITION block trades; TRENDING_* allow them; RANGING permits RSI scalps only. */
+  marketRegime?: ScalperSignalResponseMarketRegime;
+  /** Indicator Conflict Engine — counts agreement across EMA/MACD/RSI/Trend Memory/HTF/Structure. MIXED caps permission at WATCHLIST; SEVERE forces signal=CONFLICT. */
+  conflictLevel?: ScalperSignalResponseConflictLevel;
+  /** Plain-language list of WHY indicators disagree. */
+  conflictReasons?: string[];
+  /** Per-indicator vote breakdown. EMA = trend filter, MACD = momentum confirmation, RSI = timing, Momentum = Trend Memory, HTF = 15m higher trend, Structure = HH/HL vs LL/LH. */
+  indicatorBias?: ScalperSignalResponseIndicatorBias;
+  /** Chop / Volatility filter — 0..1. > 0.6 = consolidation / choppy; setups are blocked. Combines candle direction-flip density and EMA20/EMA50 cross frequency. */
+  chopScore?: number;
+  /** Soft user-facing banner ("Mixed indicators — waiting for structure confirmation", "Choppy market — no scalp setups", etc.). Set by the UI Decision Engine. */
+  bannerMessage?: string;
   confidence: number;
   entry: number;
   /** ATR-based stop. SL = entry ∓ ATR × 1.0 (always 1R away). */

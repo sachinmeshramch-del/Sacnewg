@@ -31,9 +31,27 @@ interface Indicators {
   atr: number;
 }
 
+// ── Signal Decision Layer (NEW) ──────────────────────────────────────────────
+// `signal` answers WHAT the engine sees (direction).
+// `permission` answers WHETHER the user should act on it.
+// They are intentionally split: a BUY with mixed evidence becomes
+// signal=BUY + permission=WATCHLIST (no trade levels, just context).
+type IndicatorVote = "BULLISH" | "BEARISH" | "NEUTRAL";
+interface IndicatorBias {
+  ema:       IndicatorVote;  // trend filter (EMA20 vs EMA50)
+  macd:      IndicatorVote;  // momentum confirmation (MACD line vs signal)
+  rsi:       IndicatorVote;  // timing condition (RSI vs 50)
+  momentum:  IndicatorVote;  // Trend Memory (last 8 candles)
+  htf:       IndicatorVote;  // higher TF (15m) trend
+  structure: IndicatorVote;  // HH/HL vs LL/LH market structure
+}
+
 interface SignalResult {
-  signal: "BUY" | "SELL" | "HOLD" | "SETUP";
+  signal: "BUY" | "SELL" | "HOLD" | "SETUP" | "CONFLICT";
   confidence: number;
+  // Permission gate — ACTIONABLE > QUALIFIED > WATCHLIST > BLOCKED.
+  // Only QUALIFIED+ shows trade levels. WATCHLIST is "context only".
+  permission?: "ACTIONABLE" | "QUALIFIED" | "WATCHLIST" | "BLOCKED";
   entry: number;
   stopLoss: number;
   takeProfit: number;       // = tp2 (final target, 2.2× risk)
@@ -42,6 +60,8 @@ interface SignalResult {
   trend: "BULLISH" | "BEARISH" | "NEUTRAL";
   trendStrength?: "STRONG" | "WEAK" | "RANGE";
   marketMode: "TRENDING" | "SIDEWAYS";
+  // Higher-resolution market regime (NEW). Drives the conflict / chop logic.
+  marketRegime?: "TRENDING_BULL" | "TRENDING_BEAR" | "RANGING" | "CHOPPY" | "TRANSITION";
   signalLabel?: string;
   signalStatus?: "PENDING" | "CONFIRMED";
   signalType?: "TREND" | "REVERSAL";
@@ -50,6 +70,16 @@ interface SignalResult {
   entryQuality?: "EARLY" | "CONFIRMED";
   marketState?: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH";
   blockReason?: string;
+  // Indicator Conflict Engine (NEW) — surfaces WHY a setup isn't tradable.
+  conflictLevel?: "NONE" | "MINOR" | "MIXED" | "SEVERE";
+  conflictReasons?: string[];
+  indicatorBias?: IndicatorBias;
+  // Chop / Volatility filter (NEW) — 0..1, > 0.6 = consolidation / chop.
+  chopScore?: number;
+  // Soft user-facing banner ("Mixed indicators — waiting for structure
+  // confirmation", "Bearish trend context", etc.). Set by the UI Decision
+  // Engine layer, separate from signalLabel.
+  bannerMessage?: string;
   zoneStatus?: "BUY_ZONE" | "SELL_ZONE" | "NO_ZONE";
   pullbackConfirmation?: "WAITING" | "REJECTION_DETECTED";
   // Pullback State Detector — separate from zoneStatus; based on EMA20/EMA50 position.
@@ -1134,6 +1164,221 @@ function isStrongReversal(
   return ind.rsi > 70 && macdBearCross && !ind.lastCandleBullish;
 }
 
+// ── Indicator Conflict Engine ─────────────────────────────────────────────────
+// Each indicator has ONE job (per spec):
+//   EMA       → trend filter
+//   MACD      → momentum confirmation
+//   RSI       → timing condition
+//   Trend Mem → recent directional memory (8-candle bias)
+//   HTF (15m) → higher-timeframe trend
+//   Structure → HH/HL vs LL/LH market structure
+// We collect each indicator's vote then count agreement. The output drives:
+//   permission gating, the bannerMessage, and the CONFLICT signal state.
+export function computeIndicatorBias(ind: ExtendedIndicators, htf: HigherTrend): IndicatorBias {
+  const ema: IndicatorVote =
+    ind.ema20 > ind.ema50 * 1.0002 ? "BULLISH" :
+    ind.ema20 < ind.ema50 * 0.9998 ? "BEARISH" : "NEUTRAL";
+
+  // MACD: only count it as bullish/bearish when BOTH line-vs-signal AND
+  // histogram agree. Otherwise it's mixed → NEUTRAL (avoids double-counting
+  // weak / near-zero histograms).
+  const macd: IndicatorVote =
+    (ind.macdLine > ind.macdSignal && ind.macdHistogram > 0) ? "BULLISH" :
+    (ind.macdLine < ind.macdSignal && ind.macdHistogram < 0) ? "BEARISH" : "NEUTRAL";
+
+  // RSI as timing only — extreme zones speak strongly, the middle stays neutral.
+  const rsi: IndicatorVote =
+    ind.rsi > 55 ? "BULLISH" :
+    ind.rsi < 45 ? "BEARISH" : "NEUTRAL";
+
+  const momentum: IndicatorVote =
+    ind.momentumBias === "BULLISH" ? "BULLISH" :
+    ind.momentumBias === "BEARISH" ? "BEARISH" : "NEUTRAL";
+
+  const htfVote: IndicatorVote =
+    htf === "BULLISH" ? "BULLISH" :
+    htf === "BEARISH" ? "BEARISH" : "NEUTRAL";
+
+  // Structure: the Smart Trend output already encodes HH/HL vs LL/LH.
+  const structure: IndicatorVote =
+    ind.trendDirection === "BULLISH" ? "BULLISH" :
+    ind.trendDirection === "BEARISH" ? "BEARISH" : "NEUTRAL";
+
+  return { ema, macd, rsi, momentum, htf: htfVote, structure };
+}
+
+export function detectIndicatorConflict(bias: IndicatorBias):
+  { level: "NONE" | "MINOR" | "MIXED" | "SEVERE"; reasons: string[] }
+{
+  const votes = [bias.ema, bias.macd, bias.rsi, bias.momentum, bias.htf, bias.structure];
+  const bull    = votes.filter(v => v === "BULLISH").length;
+  const bear    = votes.filter(v => v === "BEARISH").length;
+  const neutral = votes.filter(v => v === "NEUTRAL").length;
+
+  const reasons: string[] = [];
+  // Direct EMA-vs-Memory disagreement is the classic "trap setup" tell.
+  if (bias.ema === "BULLISH" && bias.momentum === "BEARISH") reasons.push("EMA bullish but trend memory bearish");
+  if (bias.ema === "BEARISH" && bias.momentum === "BULLISH") reasons.push("EMA bearish but trend memory bullish");
+  if (bias.ema === "BULLISH" && bias.macd === "BEARISH")     reasons.push("EMA bullish but MACD bearish");
+  if (bias.ema === "BEARISH" && bias.macd === "BULLISH")     reasons.push("EMA bearish but MACD bullish");
+  if (bias.htf === "NEUTRAL")                                reasons.push("Higher TF (15m) is neutral");
+  if (bias.structure === "NEUTRAL" && (bull >= 2 || bear >= 2)) {
+    reasons.push("No confirmed market structure yet");
+  }
+
+  // Severity:
+  //   SEVERE = 2+ on each side (real opposing votes), no clear winner
+  //   MIXED  = both sides have at least one vote and the gap is ≤ 1
+  //   MINOR  = clear leader but ≥ 1 dissent or HTF neutral
+  //   NONE   = unanimous-ish (all in one direction or only neutrals)
+  let level: "NONE" | "MINOR" | "MIXED" | "SEVERE" = "NONE";
+  if (bull >= 2 && bear >= 2)                    level = "SEVERE";
+  else if (bull >= 1 && bear >= 1 && Math.abs(bull - bear) <= 1) level = "MIXED";
+  else if ((bull > 0 && bear > 0) || bias.htf === "NEUTRAL")     level = "MINOR";
+  else if (neutral === votes.length)             level = "MINOR"; // entirely flat = mild caution
+
+  return { level, reasons };
+}
+
+// ── Chop / Volatility Filter ──────────────────────────────────────────────────
+// Returns 0..1 — higher = choppier. > 0.6 ≈ pure consolidation.
+// Combines two signals:
+//   1. Direction-change density: how often candles flip direction (last 14)
+//   2. EMA20 / EMA50 oscillation: how many times EMA20 crosses EMA50 (last 20)
+// A trending market has few direction flips and zero EMA crosses.
+export function computeChopScore(
+  closes: number[], opens: number[],
+  ema20Arr: number[], ema50Arr: number[],
+): number {
+  const N = 14;
+  if (closes.length < N + 1 || opens.length < N + 1) return 0;
+  let flips = 0;
+  for (let i = closes.length - N + 1; i < closes.length; i++) {
+    const cur  = closes[i] >= opens[i] ? 1 : -1;
+    const prev = closes[i - 1] >= opens[i - 1] ? 1 : -1;
+    if (cur !== prev) flips++;
+  }
+  // Random walk sits ~7/14 flips; trending ~3-4. Normalise to 0..1.
+  const flipScore = Math.min(1, Math.max(0, (flips - 4) / (N - 4)));
+
+  let crosses = 0;
+  const M = Math.min(20, ema20Arr.length, ema50Arr.length) - 1;
+  for (let i = ema20Arr.length - M; i < ema20Arr.length; i++) {
+    if (i <= 0) continue;
+    const curUp  = ema20Arr[i]     > ema50Arr[i];
+    const prevUp = ema20Arr[i - 1] > ema50Arr[i - 1];
+    if (curUp !== prevUp) crosses++;
+  }
+  const crossScore = Math.min(1, crosses / 3); // 3 EMA flips in 20 bars = max chop
+
+  // Weighted blend — flip density is the stronger signal.
+  return parseFloat((flipScore * 0.65 + crossScore * 0.35).toFixed(3));
+}
+
+// ── Market Regime Engine ──────────────────────────────────────────────────────
+// One label that summarises the playing field. Drives both the permission
+// engine and the user-facing banner.
+export function classifyMarketRegime(
+  trendDirection: "BULLISH" | "BEARISH" | "SIDEWAYS",
+  trendStrength:  "STRONG" | "WEAK" | "RANGE",
+  chopScore:      number,
+  conflictLevel:  "NONE" | "MINOR" | "MIXED" | "SEVERE",
+): "TRENDING_BULL" | "TRENDING_BEAR" | "RANGING" | "CHOPPY" | "TRANSITION" {
+  if (chopScore > 0.6 || conflictLevel === "SEVERE") return "CHOPPY";
+  if (conflictLevel === "MIXED")                     return "TRANSITION";
+  if (trendDirection === "BULLISH" && trendStrength !== "WEAK") return "TRENDING_BULL";
+  if (trendDirection === "BEARISH" && trendStrength !== "WEAK") return "TRENDING_BEAR";
+  if (trendDirection === "SIDEWAYS" || trendStrength === "RANGE") return "RANGING";
+  // Weak trend + no severe conflict = transitional
+  return "TRANSITION";
+}
+
+// ── Permission Engine — splits "I see a setup" from "you should trade it" ─────
+// Rules (per spec):
+//   • SEVERE conflict          → BLOCKED
+//   • CHOPPY regime            → BLOCKED (no scalps in chop)
+//   • signal already HOLD/CONFLICT → BLOCKED
+//   • HTF NEUTRAL              → cap at QUALIFIED unless conf ≥ 80
+//   • MIXED conflict           → cap at WATCHLIST (context only, no levels)
+//   • confidence < 60          → WATCHLIST
+//   • CONFIRMED + HTF aligned + conf ≥ 75 + no conflict → ACTIONABLE
+//   • everything else passes  → QUALIFIED
+export function derivePermission(
+  signal:        SignalResult["signal"],
+  signalStatus:  SignalResult["signalStatus"],
+  confidence:    number,
+  conflictLevel: "NONE" | "MINOR" | "MIXED" | "SEVERE",
+  htf:           HigherTrend,
+  regime:        SignalResult["marketRegime"],
+  mtfStatus:     SignalResult["mtfStatus"],
+): "ACTIONABLE" | "QUALIFIED" | "WATCHLIST" | "BLOCKED" {
+  // Non-directional signals never get tradable permission.
+  if (signal === "HOLD" || signal === "CONFLICT") return "BLOCKED";
+  if (signal === "SETUP") return "WATCHLIST";
+
+  // Hard blocks first.
+  if (conflictLevel === "SEVERE") return "BLOCKED";
+  if (regime === "CHOPPY")        return "BLOCKED";
+  if (mtfStatus === "BLOCKED")    return "BLOCKED";
+
+  // Low confidence is informational only.
+  if (confidence < 60) return "WATCHLIST";
+
+  // MIXED evidence caps at WATCHLIST regardless of confidence —
+  // shows context, hides trade levels.
+  if (conflictLevel === "MIXED") return "WATCHLIST";
+
+  // HTF neutral cap — needs unusually strong confirmation to trade.
+  if (htf === "NEUTRAL" && confidence < 80) return "QUALIFIED";
+
+  // Everything aligned + confirmed + high conf = full permission.
+  if (signalStatus === "CONFIRMED" && mtfStatus === "ALIGNED" &&
+      confidence >= 75 && conflictLevel === "NONE") {
+    return "ACTIONABLE";
+  }
+
+  return "QUALIFIED";
+}
+
+// ── UI Decision Engine — soften aggressive labels + build banner ──────────────
+export function buildBannerMessage(
+  permission:    "ACTIONABLE" | "QUALIFIED" | "WATCHLIST" | "BLOCKED",
+  conflictLevel: "NONE" | "MINOR" | "MIXED" | "SEVERE",
+  regime:        SignalResult["marketRegime"],
+  htf:           HigherTrend,
+): string | undefined {
+  if (regime === "CHOPPY")          return "Choppy market — no scalp setups";
+  if (conflictLevel === "SEVERE")   return "Conflict / Transition — indicators disagree, stand aside";
+  if (conflictLevel === "MIXED")    return "Mixed indicators — waiting for structure confirmation";
+  if (permission === "WATCHLIST")   return "Watchlist only — context not yet tradable";
+  if (htf === "NEUTRAL" && permission === "QUALIFIED") return "Higher TF neutral — caution";
+  return undefined;
+}
+
+export function softenSignalLabel(
+  signalLabel: string | undefined,
+  signal:      SignalResult["signal"],
+  permission:  "ACTIONABLE" | "QUALIFIED" | "WATCHLIST" | "BLOCKED",
+  bias:        IndicatorBias,
+): string | undefined {
+  if (!signalLabel) return signalLabel;
+  // Only soften when permission is below tradable. ACTIONABLE / QUALIFIED keep
+  // the original engine label.
+  if (permission === "ACTIONABLE" || permission === "QUALIFIED") return signalLabel;
+
+  // For WATCHLIST / BLOCKED, replace strong labels with descriptive ones.
+  if (signal === "BUY")   return bias.macd === "BULLISH" ? "Candidate buy area · mild bullish momentum"
+                                                          : "Candidate buy area · weak momentum";
+  if (signal === "SELL")  return bias.macd === "BEARISH" ? "Candidate sell area · weak bearish MACD"
+                                                          : "Candidate sell area · weak momentum";
+  if (signal === "SETUP") return "Setup forming · waiting for confirmation";
+  if (signal === "CONFLICT") return "Conflict / Transition";
+  // HOLD: describe the trend context softly
+  if (bias.ema === "BULLISH") return "Bullish trend context · no entry";
+  if (bias.ema === "BEARISH") return "Bearish trend context · no entry";
+  return "Neutral context · no entry";
+}
+
 // ── Multi-Timeframe Confirmation ──────────────────────────────────────────────
 // Status rules (per spec):
 //   • signal == HOLD                       → mtfStatus = "WAITING"
@@ -1681,16 +1926,72 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
   const mtfAdjusted    = applyMtfConfirmation(rawResult, higherTrend, timeframe, indicators);
   const filteredResult = applyFilters(mtfAdjusted, tfKey, currentPrice, lastCandleTs, indicators);
 
+  // ── Indicator Conflict + Chop + Regime + Permission (NEW) ────────────────
+  // Runs AFTER applyFilters so it sees the final signal/confidence, then
+  // makes the call on whether the user should actually act on it. The
+  // existing engine remains untouched; this is a decision LAYER on top.
+  const indicatorBias  = computeIndicatorBias(indicators, higherTrend);
+  const conflict       = detectIndicatorConflict(indicatorBias);
+  const chopScore      = ohlc
+    ? computeChopScore(
+        cleanArray(ohlc.close), cleanArray(ohlc.open),
+        calcEMA(cleanArray(ohlc.close), 20),
+        calcEMA(cleanArray(ohlc.close), 50),
+      )
+    : 0;
+  const marketRegime   = classifyMarketRegime(
+    indicators.trendDirection, indicators.trendStrength,
+    chopScore, conflict.level,
+  );
+
+  // Promote to first-class CONFLICT state when truly mixed/choppy. Keeps the
+  // direction context on bias so UI can still describe the trend.
+  let decisionSignal = filteredResult.signal;
+  if (conflict.level === "SEVERE" || marketRegime === "CHOPPY") {
+    if (decisionSignal !== "HOLD" && decisionSignal !== "SETUP") {
+      decisionSignal = "CONFLICT";
+    }
+  }
+
+  const permission = derivePermission(
+    decisionSignal,
+    filteredResult.signalStatus,
+    filteredResult.confidence,
+    conflict.level,
+    higherTrend,
+    marketRegime,
+    filteredResult.mtfStatus,
+  );
+
+  const bannerMessage = buildBannerMessage(permission, conflict.level, marketRegime, higherTrend);
+  const softenedLabel = softenSignalLabel(filteredResult.signalLabel, decisionSignal, permission, indicatorBias);
+
+  // ── Strip trade levels when not tradable (per spec) ──────────────────────
+  // BLOCKED / WATCHLIST → no actionable Entry / SL / TP shown; zone status
+  // also clears so the UI doesn't display "BUY ZONE" beside a non-tradable.
+  const stripped = permission === "BLOCKED" || permission === "WATCHLIST";
+  const safeEntry      = stripped ? 0 : filteredResult.entry;
+  const safeSL         = stripped ? 0 : filteredResult.stopLoss;
+  const safeTP         = stripped ? 0 : filteredResult.takeProfit;
+  const safeTP1        = stripped ? undefined : filteredResult.tp1;
+  const safeTP2        = stripped ? undefined : filteredResult.tp2;
+  const safeZoneStatus = stripped ? "NO_ZONE" : (filteredResult.zoneStatus ?? indicators.zoneStatus);
+
   // Record a confirmed signal — starts the 3-min cooldown AND opens the
-  // single active trade slot (cleared on TP/SL hit or 10-min timeout).
-  if (filteredResult.signal !== "HOLD" && filteredResult.signalStatus === "CONFIRMED") {
+  // single active trade slot. Now ALSO requires permission ≥ QUALIFIED so
+  // mixed / blocked setups never enter the active-trade slot.
+  if (
+    decisionSignal !== "HOLD" && decisionSignal !== "SETUP" && decisionSignal !== "CONFLICT" &&
+    filteredResult.signalStatus === "CONFIRMED" &&
+    (permission === "QUALIFIED" || permission === "ACTIONABLE")
+  ) {
     lastSignalMemory[tfKey] = {
-      signal: filteredResult.signal as "BUY" | "SELL",
+      signal: decisionSignal as "BUY" | "SELL",
       price: currentPrice,
       timestamp: Date.now(),
     };
     activeTrade[tfKey] = {
-      signal: filteredResult.signal as "BUY" | "SELL",
+      signal: decisionSignal as "BUY" | "SELL",
       entry: filteredResult.entry,
       stopLoss: filteredResult.stopLoss,
       takeProfit: filteredResult.takeProfit,
@@ -1700,13 +2001,22 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
 
   const result: SignalResult = {
     ...filteredResult,
-    // Always surface Pullback Engine status from indicators so the UI can show
-    // the live zone + rejection state regardless of which branch produced the
-    // final signal (HOLD, SETUP, BUY/SELL, blocked, etc.).
-    zoneStatus: filteredResult.zoneStatus ?? indicators.zoneStatus,
+    signal: decisionSignal,
+    signalLabel: softenedLabel,
+    permission,
+    marketRegime,
+    conflictLevel:   conflict.level,
+    conflictReasons: conflict.reasons,
+    indicatorBias,
+    chopScore,
+    bannerMessage,
+    entry:      safeEntry,
+    stopLoss:   safeSL,
+    takeProfit: safeTP,
+    tp1:        safeTP1,
+    tp2:        safeTP2,
+    zoneStatus: safeZoneStatus,
     pullbackConfirmation: filteredResult.pullbackConfirmation ?? indicators.pullbackConfirmation,
-    // Surface Pullback State + Trend Memory so the UI can render the new
-    // BULLISH_PULLBACK / BEARISH_PULLBACK badges and momentum bias.
     pullbackState: filteredResult.pullbackState ?? indicators.pullbackState,
     momentumBias:  filteredResult.momentumBias  ?? indicators.momentumBias,
     momentumScore: filteredResult.momentumScore ?? indicators.momentumScore,
@@ -1722,8 +2032,13 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     signal5mExpiry  = Date.now() + signalTtl;
   }
 
-  // Only confirmed (tradable) signals enter history — pending ones don't
-  if (result.signal !== "HOLD" && result.signalStatus === "CONFIRMED") {
+  // Only confirmed AND tradable signals enter history. CONFLICT/SETUP are
+  // informational; WATCHLIST/BLOCKED have no real entry levels to track.
+  if (
+    (result.signal === "BUY" || result.signal === "SELL") &&
+    result.signalStatus === "CONFIRMED" &&
+    (result.permission === "QUALIFIED" || result.permission === "ACTIONABLE")
+  ) {
     addToHistory(result);
   }
 
@@ -1732,8 +2047,8 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
 
 // ── History ────────────────────────────────────────────────────────────────────
 function addToHistory(signal: SignalResult) {
-  // History only stores tradable BUY/SELL/HOLD outcomes — SETUP is informational.
-  if (signal.signal === "SETUP") return;
+  // History only stores tradable BUY/SELL/HOLD outcomes — SETUP/CONFLICT are informational.
+  if (signal.signal === "SETUP" || signal.signal === "CONFLICT") return;
   const item: HistoryItem = {
     id: historyIdCounter++,
     signal: signal.signal,

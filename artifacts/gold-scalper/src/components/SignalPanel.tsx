@@ -200,6 +200,72 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 {data.signal}
               </div>
 
+              {/* Permission + Market Regime — at-a-glance "should I act?" row.
+                  Permission is the gate (ACTIONABLE/QUALIFIED show levels;
+                  WATCHLIST/BLOCKED hide them). Regime is the "what kind of
+                  market is this" tag. Both come from the new decision layer. */}
+              {(data.permission || data.marketRegime) && (
+                <div className="mt-2 flex items-center gap-1.5 flex-wrap justify-center">
+                  {data.permission && (
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-md text-[9.5px] font-black tracking-widest uppercase border",
+                      data.permission === "ACTIONABLE" && "border-success/60 bg-success/15 text-success",
+                      data.permission === "QUALIFIED"  && "border-success/30 bg-success/8 text-success/90",
+                      data.permission === "WATCHLIST"  && "border-warning/40 bg-warning/10 text-warning",
+                      data.permission === "BLOCKED"    && "border-destructive/30 bg-destructive/10 text-destructive/90",
+                    )}>
+                      {data.permission}
+                    </span>
+                  )}
+                  {data.marketRegime && (
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-md text-[9.5px] font-bold tracking-widest uppercase border",
+                      data.marketRegime === "TRENDING_BULL" && "border-success/40 bg-success/8 text-success/90",
+                      data.marketRegime === "TRENDING_BEAR" && "border-destructive/40 bg-destructive/8 text-destructive/90",
+                      data.marketRegime === "RANGING"       && "border-border/50 bg-card/60 text-muted-foreground",
+                      data.marketRegime === "CHOPPY"        && "border-amber-400/50 bg-amber-400/10 text-amber-200",
+                      data.marketRegime === "TRANSITION"    && "border-warning/40 bg-warning/10 text-warning",
+                    )}>
+                      {data.marketRegime.replace("_", " ")}
+                    </span>
+                  )}
+                  {typeof data.chopScore === "number" && data.chopScore > 0.45 && (
+                    <span className="px-2 py-0.5 rounded-md text-[9.5px] font-bold tracking-widest uppercase border border-amber-400/40 bg-amber-400/10 text-amber-200">
+                      CHOP {Math.round(data.chopScore * 100)}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Decision-layer banner — soft, descriptive ("Mixed indicators
+                  — waiting for structure confirmation", "Choppy market", etc.).
+                  Quietly placed so it informs without alarming. */}
+              {data.bannerMessage && (
+                <div className={cn(
+                  "mt-2 px-3 py-2 rounded-md border text-[10.5px] tracking-wide max-w-[320px] text-center",
+                  data.signal === "CONFLICT"
+                    ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
+                    : data.permission === "WATCHLIST"
+                      ? "border-warning/40 bg-warning/10 text-warning"
+                      : "border-border/40 bg-card/40 text-muted-foreground",
+                )}>
+                  {data.bannerMessage}
+                </div>
+              )}
+
+              {/* Indicator conflict reasons (compact list) — shown when MIXED+ */}
+              {data.conflictReasons && data.conflictReasons.length > 0 &&
+                (data.conflictLevel === "MIXED" || data.conflictLevel === "SEVERE") && (
+                <ul className="mt-2 max-w-[320px] space-y-0.5 text-[9.5px] text-muted-foreground/80">
+                  {data.conflictReasons.slice(0, 3).map((r: string, i: number) => (
+                    <li key={i} className="flex items-start gap-1.5">
+                      <span className="text-amber-400/70 leading-none mt-[2px]">•</span>
+                      <span>{r}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
               {/* Trap / Stop-Hunt banner — highest priority alert */}
               {data.signal !== "HOLD" && data.signalLabel && (
                 data.signalLabel.includes("FAKE BREAKOUT") ||
@@ -263,22 +329,35 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
-              {/* Pullback Entry Engine — zone + rejection live status */}
+              {/* Pullback Entry Engine — zone + rejection live status.
+                  Coloured BUY ZONE / SELL ZONE labels only appear when the
+                  setup is actually tradable. Otherwise we show neutral
+                  "Candidate buy/sell area" so the panel doesn't urge action
+                  on a non-qualified zone. */}
               {(data.zoneStatus || data.pullbackConfirmation) && (
                 <div className="mt-3 w-full max-w-[260px] mx-auto rounded-md border border-border/40 bg-card/40 px-3 py-2 text-[10px] tracking-wide space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Pullback Zone</span>
-                    <span className={cn(
-                      "font-bold tracking-widest",
-                      data.zoneStatus === "BUY_ZONE"  && "text-success",
-                      data.zoneStatus === "SELL_ZONE" && "text-destructive",
-                      (!data.zoneStatus || data.zoneStatus === "NO_ZONE") && "text-muted-foreground",
-                    )}>
-                      {data.zoneStatus === "BUY_ZONE"  ? "BUY ZONE"
-                        : data.zoneStatus === "SELL_ZONE" ? "SELL ZONE"
-                        :                                    "NO ZONE"}
-                    </span>
-                  </div>
+                  {(() => {
+                    const qualified = data.permission === "QUALIFIED" || data.permission === "ACTIONABLE";
+                    const zone = data.zoneStatus;
+                    const label = qualified
+                      ? (zone === "BUY_ZONE"  ? "BUY ZONE"
+                       : zone === "SELL_ZONE" ? "SELL ZONE"
+                       :                        "NO ZONE")
+                      : (zone === "BUY_ZONE"  ? "Candidate buy area"
+                       : zone === "SELL_ZONE" ? "Candidate sell area"
+                       :                        "No zone");
+                    const colour = qualified
+                      ? (zone === "BUY_ZONE"  ? "text-success"
+                       : zone === "SELL_ZONE" ? "text-destructive"
+                       :                        "text-muted-foreground")
+                      : "text-muted-foreground";
+                    return (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Pullback Zone</span>
+                        <span className={cn("font-bold tracking-widest", colour)}>{label}</span>
+                      </div>
+                    );
+                  })()}
                   <div className="flex items-center justify-between pt-1 border-t border-border/30">
                     <span className="text-muted-foreground">Confirmation</span>
                     <span className={cn(
@@ -421,40 +500,60 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
               </div>
             </div>
 
-            {/* Trade Parameters — Entry, SL, TP1 (partial), TP2 (final) */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                <Target className="h-4 w-4 text-blue-400 mb-2" />
-                <span className="text-[10px] uppercase text-muted-foreground mb-1">Entry</span>
-                <span className="font-numbers font-bold text-foreground text-sm">
-                  {data.entry ? `$${data.entry.toFixed(2)}` : "N/A"}
+            {/* Trade Parameters — Entry, SL, TP1 (partial), TP2 (final).
+                Only shown when permission is QUALIFIED or ACTIONABLE. WATCHLIST
+                and BLOCKED states hide the trade card entirely so the user
+                isn't tempted to act on a non-tradable setup. */}
+            {(data.permission === "QUALIFIED" || data.permission === "ACTIONABLE") ? (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                  <Target className="h-4 w-4 text-blue-400 mb-2" />
+                  <span className="text-[10px] uppercase text-muted-foreground mb-1">Entry</span>
+                  <span className="font-numbers font-bold text-foreground text-sm">
+                    {data.entry ? `$${data.entry.toFixed(2)}` : "N/A"}
+                  </span>
+                </div>
+                <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                  <ShieldAlert className="h-4 w-4 text-destructive mb-2" />
+                  <span className="text-[10px] uppercase text-muted-foreground mb-1">Stop Loss</span>
+                  <span className="font-numbers font-bold text-destructive text-sm">
+                    {data.stopLoss ? `$${data.stopLoss.toFixed(2)}` : "N/A"}
+                  </span>
+                  <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.0× ATR</span>
+                </div>
+                <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                  <Coins className="h-4 w-4 text-success/80 mb-2" />
+                  <span className="text-[10px] uppercase text-muted-foreground mb-1">TP1 · Partial</span>
+                  <span className="font-numbers font-bold text-success/85 text-sm">
+                    {data.tp1 ? `$${data.tp1.toFixed(2)}` : "—"}
+                  </span>
+                  <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.2 R</span>
+                </div>
+                <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-success/5 border border-success/20">
+                  <Coins className="h-4 w-4 text-success mb-2" />
+                  <span className="text-[10px] uppercase text-muted-foreground mb-1">TP2 · Final</span>
+                  <span className="font-numbers font-bold text-success text-sm">
+                    {data.tp2 ? `$${data.tp2.toFixed(2)}` : (data.takeProfit ? `$${data.takeProfit.toFixed(2)}` : "N/A")}
+                  </span>
+                  <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">2.2 R</span>
+                </div>
+              </div>
+            ) : (
+              /* Non-tradable state — replace the trade card with a clean
+                 "no levels yet" placeholder. Communicates clearly why no
+                 entry/SL/TP is shown without leaving an empty space. */
+              <div className="rounded-xl bg-white/[0.02] border border-white/5 px-4 py-5 flex flex-col items-center text-center gap-1.5">
+                <ShieldAlert className="h-4 w-4 text-muted-foreground/60" />
+                <span className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-semibold">
+                  No trade levels
+                </span>
+                <span className="text-[10px] text-muted-foreground/60 max-w-[280px]">
+                  {data.permission === "WATCHLIST"
+                    ? "Watchlist only — context shown above. Wait for confirmation before acting."
+                    : "Setup is not tradable right now. Stand aside until conditions improve."}
                 </span>
               </div>
-              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                <ShieldAlert className="h-4 w-4 text-destructive mb-2" />
-                <span className="text-[10px] uppercase text-muted-foreground mb-1">Stop Loss</span>
-                <span className="font-numbers font-bold text-destructive text-sm">
-                  {data.stopLoss ? `$${data.stopLoss.toFixed(2)}` : "N/A"}
-                </span>
-                <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.0× ATR</span>
-              </div>
-              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                <Coins className="h-4 w-4 text-success/80 mb-2" />
-                <span className="text-[10px] uppercase text-muted-foreground mb-1">TP1 · Partial</span>
-                <span className="font-numbers font-bold text-success/85 text-sm">
-                  {data.tp1 ? `$${data.tp1.toFixed(2)}` : "—"}
-                </span>
-                <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.2 R</span>
-              </div>
-              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-success/5 border border-success/20">
-                <Coins className="h-4 w-4 text-success mb-2" />
-                <span className="text-[10px] uppercase text-muted-foreground mb-1">TP2 · Final</span>
-                <span className="font-numbers font-bold text-success text-sm">
-                  {data.tp2 ? `$${data.tp2.toFixed(2)}` : (data.takeProfit ? `$${data.takeProfit.toFixed(2)}` : "N/A")}
-                </span>
-                <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">2.2 R</span>
-              </div>
-            </div>
+            )}
 
             {/* Footer */}
             <div className="flex items-center justify-between pt-3 border-t border-white/5">

@@ -1,0 +1,79 @@
+Upgrade my existing trading dashboard app, do not rebuild it from scratch.
+Keep the current project structure, UI, components, styling, and existing modules where possible. Refactor and extend the signal logic only so the app gives cleaner, more accurate signals and stops showing misleading trade plans when signals conflict �.
+Current issue to fix
+My app can currently show conflicting states like:
+HOLD or BLOCKED
+Higher TF = neutral
+Trend memory = bullish
+EMA 20/50 = bearish
+RSI mildly bullish
+MACD weak bearish / near zero
+Sell zone shown
+Entry / SL / TP still visible
+This is misleading. Mixed evidence should become HOLD, WATCHLIST, or CONFLICT / TRANSITION, not a tradable BUY/SELL setup �.
+Important instruction
+Do not rebuild the app.
+Do not replace the whole codebase.
+Instead:
+inspect the existing signal modules
+reuse as much existing code as possible
+rename/refactor only where needed
+add missing logic modules
+update the current dashboard behavior
+preserve the current look and feel
+Upgrade my current engine
+My current engine has:
+Market Structure Engine
+Trend Memory System
+Multi-Timeframe Engine
+Pullback Engine
+Entry Trigger Engine
+Risk–Reward Engine
+Signal Filter Engine
+Trade Management Engine
+Confidence Scoring Engine
+UI Decision Engine
+Upgrade this existing architecture with these improvements:
+add a Market Regime layer
+add an Indicator Conflict Engine
+add a Chop / Volatility Filter
+split confidence from permission
+add a first-class CONFLICT / TRANSITION state
+prevent blocked/watchlist setups from showing Entry / SL / TP
+cap permission when Higher TF is neutral �
+Logic rules to implement
+EMA = trend filter only
+MACD = momentum confirmation only
+RSI = timing / momentum condition only
+ATR = volatility / stop sizing only, not direction
+If RSI, EMA, MACD, trend memory, and HTF disagree, classify as MIXED
+If indicators are mixed, reduce confidence and cap permission at WATCHLIST
+If Higher TF is neutral, do not allow active BUY/SELL unless confirmation is unusually strong
+If market structure is messy / overlapping / choppy, classify as consolidation or transition
+If setup is BLOCKED or WATCHLIST, hide Entry / Stop Loss / TP1 / TP2
+Show trade levels only when permission = QUALIFIED or ACTIONABLE �
+UI behavior fixes
+Update the current UI logic so:
+HOLD/BLOCKED states do not show actionable trade levels
+“Sell Zone” or “Buy Zone” only appears when setup is actually qualified
+add banner: Mixed indicators — waiting for structure confirmation
+replace over-aggressive labels with:
+Mild bullish momentum
+Bearish trend context
+Weak bearish MACD
+Candidate buy area
+Candidate sell area
+Conflict / Transition �
+Output I want
+upgrade the existing signal modules, don’t rebuild
+keep existing UI and design
+add only the missing engines and logic gates
+update current types/interfaces if needed
+patch existing confidence engine into confidence + permission
+patch current UI decision engine so blocked/watchlist states hide trade cards
+provide clean code changes with minimal disruption to the current app
+include 4 test scenarios:
+mixed indicators + neutral HTF = WATCHLIST
+bearish continuation with full alignment = SELL SETUP
+bullish reversal with confirmed structure shift = BUY SETUP
+choppy market = HOLD

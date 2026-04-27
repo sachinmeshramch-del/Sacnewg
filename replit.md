@@ -108,6 +108,20 @@ React + Vite web app at `/` (port 23682). Gold Scalper AI — 5-15 minute scalpi
 
 UI (`SignalPanel.tsx`) renders new badges: an inline `BULLISH PULLBACK` / `BEARISH PULLBACK` pill, a `SETUP FORMING` MTF status with pulsing dot, and a `Trend Memory` row inside the MTF panel showing the signed momentum score.
 
+**Decision Layer — Regime, Conflict, Chop, Permission** (`goldService.ts`, helpers exported for tests). Sits AFTER `applyFilters` and refines the engine output without rewriting it:
+- **Indicator Bias** (`computeIndicatorBias`): per-indicator BULLISH/BEARISH/NEUTRAL vote across `ema`, `macd`, `rsi`, `momentum`, `htf`, `structure`. MACD only counts when both line-vs-signal AND histogram agree.
+- **Conflict Engine** (`detectIndicatorConflict`): tallies bull/bear votes → `NONE | MINOR | MIXED | SEVERE` plus human-readable `reasons[]` (e.g. "EMA bearish but MACD bullish", "Higher TF (15m) is neutral").
+- **Chop Filter** (`computeChopScore`): 0..1 score combining last-14 candle direction-flip density (65%) + last-20 EMA20/EMA50 cross frequency (35%). > 0.6 ≈ pure consolidation.
+- **Market Regime** (`classifyMarketRegime`): single label drawn from chop + conflict + trend → `TRENDING_BULL | TRENDING_BEAR | RANGING | CHOPPY | TRANSITION`. CHOPPY when chop > 0.6 OR conflict SEVERE; TRANSITION when conflict MIXED or trend WEAK.
+- **Permission Engine** (`derivePermission`): splits "I see a setup" (signal) from "you should trade it" (permission) → `ACTIONABLE | QUALIFIED | WATCHLIST | BLOCKED`. Hard blocks on SEVERE conflict / CHOPPY regime / mtfStatus BLOCKED. MIXED conflict caps at WATCHLIST. HTF NEUTRAL caps at QUALIFIED unless conf ≥ 80. CONFIRMED + ALIGNED + conf ≥ 75 + NONE conflict = ACTIONABLE.
+- **First-class CONFLICT signal**: when permission is BLOCKED due to SEVERE conflict / CHOPPY regime, the engine promotes the displayed `signal` to `"CONFLICT"` (added to the OpenAPI enum).
+- **Level stripping**: when permission is BLOCKED or WATCHLIST, `entry`/`stopLoss`/`takeProfit` are zeroed and `zoneStatus = NO_ZONE`. Active-trade slot is only opened when permission ≥ QUALIFIED, so mixed/blocked setups never enter cooldown tracking.
+- **UI softening** (`buildBannerMessage`, `softenSignalLabel`): a `bannerMessage` is rendered ("Choppy market — no scalp setups", "Mixed indicators — waiting for structure confirmation", "Watchlist only — context not yet tradable", "Higher TF neutral — caution"), and aggressive labels are softened to "Candidate buy area · …" / "Setup forming · waiting for confirmation" when permission is below QUALIFIED.
+
+UI gating (`SignalPanel.tsx`): renders the Permission + Market Regime + (optional) chop badges row right under the big signal pill; renders the `bannerMessage` and up to 3 `conflictReasons` when MIXED+. Trade-levels grid (Entry/SL/TP1/TP2) is replaced with a "No trade levels" placeholder when permission ∉ {QUALIFIED, ACTIONABLE}. Pullback Zone label de-emphasises BUY/SELL ZONE to "Candidate buy/sell area" until qualified.
+
+**Tests**: `artifacts/api-server/src/services/__tests__/signal-engine.test.ts` — standalone tsx-runnable file with 4 fixtures (mixed+neutral HTF=WATCHLIST, full bearish=ACTIONABLE/QUALIFIED, bullish reversal=QUALIFIED, choppy=BLOCKED). Run via `pnpm --filter @workspace/api-server exec tsx src/services/__tests__/signal-engine.test.ts`.
+
 ### `artifacts/gold-intraday` (`@workspace/gold-intraday`)
 
 React + Vite web app at `/intraday/` (port 23161). Gold Intraday AI Trader — 1-4 hour intraday signals using EMA20/EMA50, support/resistance, multi-timeframe analysis (15m/30m/1h). No Telegram integration.

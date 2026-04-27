@@ -7,7 +7,7 @@
  */
 
 /**
- * BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming.
+ * BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming; CONFLICT = indicators disagree or chop detected, do not trade.
  */
 export type ScalperSignalResponseSignal =
   (typeof ScalperSignalResponseSignal)[keyof typeof ScalperSignalResponseSignal];
@@ -17,4 +17,5 @@ export const ScalperSignalResponseSignal = {
   SELL: "SELL",
   HOLD: "HOLD",
   SETUP: "SETUP",
+  CONFLICT: "CONFLICT",
 } as const;

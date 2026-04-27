@@ -37,9 +37,56 @@ export const GetSignalQueryParams = zod.object({
 
 export const GetSignalResponse = zod.object({
   signal: zod
-    .enum(["BUY", "SELL", "HOLD", "SETUP"])
+    .enum(["BUY", "SELL", "HOLD", "SETUP", "CONFLICT"])
     .describe(
-      "BUY\/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming.",
+      "BUY\/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming; CONFLICT = indicators disagree or chop detected, do not trade.",
+    ),
+  permission: zod
+    .enum(["ACTIONABLE", "QUALIFIED", "WATCHLIST", "BLOCKED"])
+    .optional()
+    .describe(
+      'Decision Engine — splits \"I see a setup\" from \"you should trade it\". ACTIONABLE\/QUALIFIED show trade levels; WATCHLIST\/BLOCKED hide them. WATCHLIST = mixed indicators, context only. BLOCKED = severe conflict, chop, or HOLD.',
+    ),
+  marketRegime: zod
+    .enum(["TRENDING_BULL", "TRENDING_BEAR", "RANGING", "CHOPPY", "TRANSITION"])
+    .optional()
+    .describe(
+      "Market Regime layer — finer than marketMode. CHOPPY\/TRANSITION block trades; TRENDING_\* allow them; RANGING permits RSI scalps only.",
+    ),
+  conflictLevel: zod
+    .enum(["NONE", "MINOR", "MIXED", "SEVERE"])
+    .optional()
+    .describe(
+      "Indicator Conflict Engine — counts agreement across EMA\/MACD\/RSI\/Trend Memory\/HTF\/Structure. MIXED caps permission at WATCHLIST; SEVERE forces signal=CONFLICT.",
+    ),
+  conflictReasons: zod
+    .array(zod.string())
+    .optional()
+    .describe("Plain-language list of WHY indicators disagree."),
+  indicatorBias: zod
+    .object({
+      ema: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]).optional(),
+      macd: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]).optional(),
+      rsi: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]).optional(),
+      momentum: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]).optional(),
+      htf: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]).optional(),
+      structure: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]).optional(),
+    })
+    .optional()
+    .describe(
+      "Per-indicator vote breakdown. EMA = trend filter, MACD = momentum confirmation, RSI = timing, Momentum = Trend Memory, HTF = 15m higher trend, Structure = HH\/HL vs LL\/LH.",
+    ),
+  chopScore: zod
+    .number()
+    .optional()
+    .describe(
+      "Chop \/ Volatility filter — 0..1. > 0.6 = consolidation \/ choppy; setups are blocked. Combines candle direction-flip density and EMA20\/EMA50 cross frequency.",
+    ),
+  bannerMessage: zod
+    .string()
+    .optional()
+    .describe(
+      'Soft user-facing banner (\"Mixed indicators — waiting for structure confirmation\", \"Choppy market — no scalp setups\", etc.). Set by the UI Decision Engine.',
     ),
   confidence: zod.number(),
   entry: zod.number(),
