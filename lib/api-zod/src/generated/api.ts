@@ -43,8 +43,24 @@ export const GetSignalResponse = zod.object({
     ),
   confidence: zod.number(),
   entry: zod.number(),
-  stopLoss: zod.number(),
-  takeProfit: zod.number(),
+  stopLoss: zod
+    .number()
+    .describe("ATR-based stop. SL = entry ∓ ATR × 1.0 (always 1R away)."),
+  takeProfit: zod
+    .number()
+    .describe(
+      "Final target. Mirrors tp2 — entry ± risk × 2.2 (where risk = |entry − stopLoss|).",
+    ),
+  tp1: zod
+    .number()
+    .optional()
+    .describe(
+      "Partial-profit target — entry ± risk × 1.2 (close part of the position here).",
+    ),
+  tp2: zod
+    .number()
+    .optional()
+    .describe("Final target — entry ± risk × 2.2 (mirrors takeProfit)."),
   trend: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]),
   trendStrength: zod
     .enum(["STRONG", "WEAK", "RANGE"])

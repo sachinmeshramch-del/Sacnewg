@@ -382,8 +382,8 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
               </div>
             </div>
 
-            {/* Trade Parameters */}
-            <div className="grid grid-cols-3 gap-3">
+            {/* Trade Parameters — Entry, SL, TP1 (partial), TP2 (final) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
                 <Target className="h-4 w-4 text-blue-400 mb-2" />
                 <span className="text-[10px] uppercase text-muted-foreground mb-1">Entry</span>
@@ -397,13 +397,23 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 <span className="font-numbers font-bold text-destructive text-sm">
                   {data.stopLoss ? `$${data.stopLoss.toFixed(2)}` : "N/A"}
                 </span>
+                <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.0× ATR</span>
               </div>
               <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                <Coins className="h-4 w-4 text-success mb-2" />
-                <span className="text-[10px] uppercase text-muted-foreground mb-1">Take Profit</span>
-                <span className="font-numbers font-bold text-success text-sm">
-                  {data.takeProfit ? `$${data.takeProfit.toFixed(2)}` : "N/A"}
+                <Coins className="h-4 w-4 text-success/80 mb-2" />
+                <span className="text-[10px] uppercase text-muted-foreground mb-1">TP1 · Partial</span>
+                <span className="font-numbers font-bold text-success/85 text-sm">
+                  {data.tp1 ? `$${data.tp1.toFixed(2)}` : "—"}
                 </span>
+                <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.2 R</span>
+              </div>
+              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-success/5 border border-success/20">
+                <Coins className="h-4 w-4 text-success mb-2" />
+                <span className="text-[10px] uppercase text-muted-foreground mb-1">TP2 · Final</span>
+                <span className="font-numbers font-bold text-success text-sm">
+                  {data.tp2 ? `$${data.tp2.toFixed(2)}` : (data.takeProfit ? `$${data.takeProfit.toFixed(2)}` : "N/A")}
+                </span>
+                <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">2.2 R</span>
               </div>
             </div>
 

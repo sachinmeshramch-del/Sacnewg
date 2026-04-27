@@ -36,7 +36,9 @@ interface SignalResult {
   confidence: number;
   entry: number;
   stopLoss: number;
-  takeProfit: number;
+  takeProfit: number;       // = tp2 (final target, 2.2× risk)
+  tp1?: number;             // partial target, 1.2× risk
+  tp2?: number;             // final target, 2.2× risk (mirrors takeProfit)
   trend: "BULLISH" | "BEARISH" | "NEUTRAL";
   trendStrength?: "STRONG" | "WEAK" | "RANGE";
   marketMode: "TRENDING" | "SIDEWAYS";
@@ -654,19 +656,41 @@ function makeHold(
   };
 }
 
+// ── Risk / Reward Engine ───────────────────────────────────────────────────────
+// Single source of truth for SL/TP/TP1/TP2 across every directional signal.
+//   SL  = entry ± ATR × SL_ATR_MULT          (risk in price units)
+//   TP1 = entry ± risk × TP1_R_MULT          (partial profit ~1.2R)
+//   TP2 = entry ± risk × TP2_R_MULT          (final target  ~2.2R)
+//   takeProfit mirrors TP2 for backward compatibility.
+const SL_ATR_MULT = 1.0;
+const TP1_R_MULT  = 1.2;
+const TP2_R_MULT  = 2.2;
+
+function computeRiskTargets(entry: number, atr: number, side: "BUY" | "SELL") {
+  const risk = Math.max(atr * SL_ATR_MULT, 0.01); // never zero
+  const sign = side === "BUY" ? 1 : -1;
+  const stopLoss   = entry - sign * risk;
+  const tp1        = entry + sign * risk * TP1_R_MULT;
+  const tp2        = entry + sign * risk * TP2_R_MULT;
+  return {
+    stopLoss:   parseFloat(stopLoss.toFixed(2)),
+    takeProfit: parseFloat(tp2.toFixed(2)),
+    tp1:        parseFloat(tp1.toFixed(2)),
+    tp2:        parseFloat(tp2.toFixed(2)),
+  };
+}
+
 function makeSell(
   price: number, atr: number, confidence: number,
   marketMode: "TRENDING" | "SIDEWAYS", timeframe: string,
   indicators: ExtendedIndicators, signalLabel: string
 ): Omit<SignalResult, "timestamp"> {
-  const slDist = price * 0.004;
-  const tpDist = slDist * 1.5;
+  const targets = computeRiskTargets(price, atr, "SELL");
   return {
     signal: "SELL",
     confidence: Math.min(95, Math.round(confidence)),
     entry: parseFloat(price.toFixed(2)),
-    stopLoss: parseFloat((price + slDist).toFixed(2)),
-    takeProfit: parseFloat((price - tpDist).toFixed(2)),
+    ...targets,
     trend: "BEARISH",
     trendStrength: indicators.trendStrength,
     marketMode,
@@ -681,14 +705,12 @@ function makeBuy(
   marketMode: "TRENDING" | "SIDEWAYS", timeframe: string,
   indicators: ExtendedIndicators, signalLabel: string
 ): Omit<SignalResult, "timestamp"> {
-  const slDist = price * 0.004;
-  const tpDist = slDist * 1.5;
+  const targets = computeRiskTargets(price, atr, "BUY");
   return {
     signal: "BUY",
     confidence: Math.min(95, Math.round(confidence)),
     entry: parseFloat(price.toFixed(2)),
-    stopLoss: parseFloat((price - slDist).toFixed(2)),
-    takeProfit: parseFloat((price + tpDist).toFixed(2)),
+    ...targets,
     trend: "BULLISH",
     trendStrength: indicators.trendStrength,
     marketMode,
@@ -709,7 +731,7 @@ function tryPullbackEntry(
   timeframe: string,
   side: "BUY" | "SELL",
 ): Omit<SignalResult, "timestamp"> | null {
-  const { zoneStatus, pullbackConfirmation, rsi, atr, swingLow1, swingHigh1, lastCandleBullish } = ind;
+  const { zoneStatus, pullbackConfirmation, rsi, atr, lastCandleBullish } = ind;
 
   // Hard gates per spec
   if (side === "BUY") {
@@ -725,23 +747,9 @@ function tryPullbackEntry(
   }
 
   const entry = currentPrice;
-  let sl: number, tp: number;
-
-  if (side === "BUY") {
-    // SL = recent swing low OR entry - ATR (whichever is further from entry,
-    // capped to entry - 0.5*ATR so we never use a stop-too-tight in chop).
-    const swingSl   = swingLow1 > 0 && swingLow1 < entry ? swingLow1 : entry - atr;
-    const atrFloor  = entry - atr;
-    sl = Math.min(swingSl, atrFloor);
-    sl = Math.min(sl, entry - atr * 0.5);  // keep at least half-ATR distance
-    tp = entry + atr * 2;
-  } else {
-    const swingSl   = swingHigh1 > 0 && swingHigh1 > entry ? swingHigh1 : entry + atr;
-    const atrCeil   = entry + atr;
-    sl = Math.max(swingSl, atrCeil);
-    sl = Math.max(sl, entry + atr * 0.5);
-    tp = entry - atr * 2;
-  }
+  // Use the unified Risk/Reward Engine — fixed ATR×1.0 stop, 2.2R final target,
+  // 1.2R partial target. Keeps every directional signal on the same R:R model.
+  const targets = computeRiskTargets(entry, atr, side);
 
   // Confidence: base 70 (above the 65 floor) + small bonuses for clean setup.
   let conf = 70;
@@ -756,8 +764,7 @@ function tryPullbackEntry(
     signal: side,
     confidence: Math.min(95, Math.round(conf)),
     entry: parseFloat(entry.toFixed(2)),
-    stopLoss: parseFloat(sl.toFixed(2)),
-    takeProfit: parseFloat(tp.toFixed(2)),
+    ...targets,
     trend: side === "BUY" ? "BULLISH" : "BEARISH",
     trendStrength: ind.trendStrength,
     marketMode,

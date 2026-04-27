@@ -24,8 +24,14 @@ export interface ScalperSignalResponse {
   signal: ScalperSignalResponseSignal;
   confidence: number;
   entry: number;
+  /** ATR-based stop. SL = entry ∓ ATR × 1.0 (always 1R away). */
   stopLoss: number;
+  /** Final target. Mirrors tp2 — entry ± risk × 2.2 (where risk = |entry − stopLoss|). */
   takeProfit: number;
+  /** Partial-profit target — entry ± risk × 1.2 (close part of the position here). */
+  tp1?: number;
+  /** Final target — entry ± risk × 2.2 (mirrors takeProfit). */
+  tp2?: number;
   trend: ScalperSignalResponseTrend;
   /** Smart Trend Engine quality grade — STRONG = EMA + structure aligned (HH/HL or LL/LH); WEAK = EMA bias only; RANGE = sideways. */
   trendStrength?: ScalperSignalResponseTrendStrength;
