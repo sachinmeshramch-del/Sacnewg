@@ -268,10 +268,10 @@ export const GetHistoryResponse = zod.object({
         .optional(),
       signalStatus: zod.enum(["CONFIRMED", "PENDING"]).optional(),
       signalType: zod
-        .enum(["STRONG", "NORMAL", "WEAK", "IGNORE"])
+        .enum(["STRONG", "MODERATE", "WEAK", "IGNORE"])
         .optional()
         .describe(
-          "Confidence-derived classification. STRONG ≥ 65, NORMAL ≥ 50, WEAK ≥ 40, IGNORE below.",
+          "Confidence-derived classification. STRONG ≥ 65, MODERATE ≥ 50, WEAK ≥ 35, IGNORE below.",
         ),
     }),
   ),

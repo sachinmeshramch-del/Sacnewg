@@ -3,13 +3,13 @@ import { useSignalHistory } from "@/hooks/use-trading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { format } from "date-fns";
-import { History, Clock, Flame, Zap, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react";
+import { Clock, Flame, Zap, AlertTriangle, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type SignalType = "STRONG" | "NORMAL" | "WEAK" | "IGNORE";
-type FilterMode = "ALL" | "STRONG" | "NORMAL" | "WEAK";
+type Strength = "STRONG" | "MODERATE" | "WEAK" | "IGNORE";
 
 interface SignalRow {
   id: number;
@@ -18,16 +18,18 @@ interface SignalRow {
   entry: number;
   stopLoss: number;
   takeProfit: number;
+  trend: string;
   timeframe: string;
   timestamp: string;
-  outcome: "WIN" | "LOSS" | "PENDING" | null;
-  signalType: SignalType;
+  strength: Strength;
 }
 
-function classify(confidence: number): SignalType {
+const MAX_PER_TABLE = 20;
+
+function classify(confidence: number): Strength {
   if (confidence >= 65) return "STRONG";
-  if (confidence >= 50) return "NORMAL";
-  if (confidence >= 40) return "WEAK";
+  if (confidence >= 50) return "MODERATE";
+  if (confidence >= 35) return "WEAK";
   return "IGNORE";
 }
 
@@ -41,50 +43,6 @@ function getConfidenceBarColor(c: number) {
   if (c > 70) return "bg-success";
   if (c >= 50) return "bg-warning";
   return "bg-destructive";
-}
-
-function TypeBadge({ type }: { type: SignalType }) {
-  if (type === "STRONG") {
-    return (
-      <Badge
-        variant="outline"
-        className="border-success/40 bg-success/10 text-success py-0 text-[10px] gap-1 font-bold"
-      >
-        <Flame className="h-3 w-3" />
-        STRONG
-      </Badge>
-    );
-  }
-  if (type === "NORMAL") {
-    return (
-      <Badge
-        variant="outline"
-        className="border-warning/40 bg-warning/10 text-warning py-0 text-[10px] gap-1 font-bold"
-      >
-        <Zap className="h-3 w-3" />
-        NORMAL
-      </Badge>
-    );
-  }
-  if (type === "WEAK") {
-    return (
-      <Badge
-        variant="outline"
-        className="border-destructive/40 bg-destructive/10 text-destructive py-0 text-[10px] gap-1 font-bold"
-      >
-        <AlertTriangle className="h-3 w-3" />
-        WEAK
-      </Badge>
-    );
-  }
-  return (
-    <Badge
-      variant="outline"
-      className="border-white/10 bg-white/5 text-muted-foreground py-0 text-[10px]"
-    >
-      IGNORE
-    </Badge>
-  );
 }
 
 function ConfidenceCell({ value }: { value: number }) {
@@ -104,14 +62,40 @@ function ConfidenceCell({ value }: { value: number }) {
   );
 }
 
+function TrendCell({ trend }: { trend: string }) {
+  const t = trend?.toUpperCase();
+  if (t === "BULLISH") {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-success">
+        <TrendingUp className="h-3 w-3" />
+        BULLISH
+      </span>
+    );
+  }
+  if (t === "BEARISH") {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-destructive">
+        <TrendingDown className="h-3 w-3" />
+        BEARISH
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <Minus className="h-3 w-3" />
+      NEUTRAL
+    </span>
+  );
+}
+
 function SignalTable({
   rows,
   emptyMessage,
-  showType = true,
+  faded = false,
 }: {
   rows: SignalRow[];
   emptyMessage: string;
-  showType?: boolean;
+  faded?: boolean;
 }) {
   if (rows.length === 0) {
     return (
@@ -122,82 +106,55 @@ function SignalTable({
     );
   }
   return (
-    <div className="overflow-auto max-h-[400px]">
+    <div className={cn("overflow-auto max-h-[400px]", faded && "opacity-70")}>
       <Table>
         <TableHeader className="bg-secondary/50 sticky top-0 backdrop-blur-md z-10 border-b border-white/5">
           <TableRow className="hover:bg-transparent border-white/5">
             <TableHead className="text-xs">Time</TableHead>
             <TableHead className="text-xs">TF</TableHead>
             <TableHead className="text-xs">Signal</TableHead>
-            {showType && <TableHead className="text-xs">Type</TableHead>}
-            <TableHead className="text-xs text-right">Confidence</TableHead>
             <TableHead className="text-xs text-right">Entry</TableHead>
             <TableHead className="text-xs text-right">SL</TableHead>
             <TableHead className="text-xs text-right">TP</TableHead>
-            <TableHead className="text-xs text-center">Outcome</TableHead>
+            <TableHead className="text-xs text-right">Confidence</TableHead>
+            <TableHead className="text-xs">Trend</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map(trade => (
-            <TableRow key={trade.id} className="border-white/5 hover:bg-white/[0.02]">
+          {rows.map(row => (
+            <TableRow key={row.id} className="border-white/5 hover:bg-white/[0.02]">
               <TableCell className="text-xs font-numbers text-muted-foreground whitespace-nowrap">
-                {format(new Date(trade.timestamp), "MMM dd, HH:mm")}
+                {format(new Date(row.timestamp), "MMM dd, HH:mm")}
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">{trade.timeframe}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">{row.timeframe}</TableCell>
               <TableCell>
                 <span
                   className={cn(
                     "text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider",
-                    trade.signal === "BUY"
+                    row.signal === "BUY"
                       ? "bg-success/20 text-success"
-                      : trade.signal === "SELL"
+                      : row.signal === "SELL"
                       ? "bg-destructive/20 text-destructive"
                       : "bg-warning/20 text-warning",
                   )}
                 >
-                  {trade.signal}
+                  {row.signal}
                 </span>
               </TableCell>
-              {showType && (
-                <TableCell>
-                  <TypeBadge type={trade.signalType} />
-                </TableCell>
-              )}
-              <TableCell className="text-right">
-                <ConfidenceCell value={trade.confidence} />
-              </TableCell>
               <TableCell className="text-right font-numbers text-xs">
-                ${trade.entry.toFixed(2)}
+                ${row.entry.toFixed(2)}
               </TableCell>
               <TableCell className="text-right font-numbers text-xs text-destructive/80">
-                ${trade.stopLoss.toFixed(2)}
+                ${row.stopLoss.toFixed(2)}
               </TableCell>
               <TableCell className="text-right font-numbers text-xs text-success/80">
-                ${trade.takeProfit.toFixed(2)}
+                ${row.takeProfit.toFixed(2)}
               </TableCell>
-              <TableCell className="text-center">
-                {trade.outcome === "WIN" ? (
-                  <Badge
-                    variant="outline"
-                    className="bg-success/10 text-success border-success/20 py-0 text-[10px]"
-                  >
-                    WIN
-                  </Badge>
-                ) : trade.outcome === "LOSS" ? (
-                  <Badge
-                    variant="outline"
-                    className="bg-destructive/10 text-destructive border-destructive/20 py-0 text-[10px]"
-                  >
-                    LOSS
-                  </Badge>
-                ) : (
-                  <Badge
-                    variant="outline"
-                    className="bg-white/5 text-muted-foreground border-white/10 py-0 text-[10px]"
-                  >
-                    PENDING
-                  </Badge>
-                )}
+              <TableCell className="text-right">
+                <ConfidenceCell value={row.confidence} />
+              </TableCell>
+              <TableCell>
+                <TrendCell trend={row.trend} />
               </TableCell>
             </TableRow>
           ))}
@@ -209,60 +166,45 @@ function SignalTable({
 
 export function SignalHistory() {
   const { data, isLoading } = useSignalHistory();
-  const [filter, setFilter] = useState<FilterMode>("ALL");
+  const [strongOnly, setStrongOnly] = useState(false);
 
   const allRows = useMemo<SignalRow[]>(() => {
     if (!data?.signals) return [];
-    return data.signals.map(s => ({
-      id: s.id,
-      signal: s.signal,
-      confidence: s.confidence,
-      entry: s.entry,
-      stopLoss: s.stopLoss,
-      takeProfit: s.takeProfit,
-      timeframe: s.timeframe,
-      timestamp: s.timestamp,
-      outcome: (s.outcome ?? "PENDING") as SignalRow["outcome"],
-      // Backend now sends signalType; fall back to client-side classification
-      // for older history entries that don't have it persisted.
-      signalType: ((s as { signalType?: SignalType }).signalType ?? classify(s.confidence)) as SignalType,
-    }));
+    return data.signals
+      .map(s => ({
+        id: s.id,
+        signal: s.signal,
+        confidence: s.confidence,
+        entry: s.entry,
+        stopLoss: s.stopLoss,
+        takeProfit: s.takeProfit,
+        trend: s.trend,
+        timeframe: s.timeframe,
+        timestamp: s.timestamp,
+        strength: ((s as { signalType?: Strength }).signalType ?? classify(s.confidence)) as Strength,
+      }))
+      .filter(r => r.strength !== "IGNORE");
   }, [data]);
 
-  // Auto-priority: latest STRONG directional signal (BUY/SELL only).
+  // Sort latest first, dedup by id, cap at MAX_PER_TABLE.
+  const bucket = (kind: Exclude<Strength, "IGNORE">) =>
+    Array.from(
+      new Map(
+        allRows
+          .filter(r => r.strength === kind)
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .map(r => [r.id, r]),
+      ).values(),
+    ).slice(0, MAX_PER_TABLE);
+
+  const strongRows = useMemo(() => bucket("STRONG"), [allRows]);
+  const moderateRows = useMemo(() => bucket("MODERATE"), [allRows]);
+  const weakRows = useMemo(() => bucket("WEAK"), [allRows]);
+
+  // Auto-priority: latest STRONG directional signal.
   const latestStrong = useMemo(
-    () => allRows.find(r => r.signalType === "STRONG" && (r.signal === "BUY" || r.signal === "SELL")),
-    [allRows],
-  );
-
-  // Tradable: STRONG + NORMAL, sorted by confidence desc, capped at 20.
-  const tradableRows = useMemo(
-    () =>
-      allRows
-        .filter(r => r.signalType === "STRONG" || r.signalType === "NORMAL")
-        .sort((a, b) => b.confidence - a.confidence)
-        .slice(0, 20),
-    [allRows],
-  );
-
-  const weakRows = useMemo(
-    () => allRows.filter(r => r.signalType === "WEAK"),
-    [allRows],
-  );
-
-  const filteredAllRows = useMemo(() => {
-    if (filter === "ALL") return allRows;
-    return allRows.filter(r => r.signalType === filter);
-  }, [allRows, filter]);
-
-  const filterCounts = useMemo(
-    () => ({
-      ALL: allRows.length,
-      STRONG: allRows.filter(r => r.signalType === "STRONG").length,
-      NORMAL: allRows.filter(r => r.signalType === "NORMAL").length,
-      WEAK: weakRows.length,
-    }),
-    [allRows, weakRows],
+    () => strongRows.find(r => r.signal === "BUY" || r.signal === "SELL"),
+    [strongRows],
   );
 
   if (isLoading) {
@@ -379,102 +321,100 @@ export function SignalHistory() {
         </Card>
       )}
 
-      {/* Tradable Signals Table — STRONG + NORMAL, sorted by confidence desc */}
-      <Card className="border-white/10 bg-card/80 backdrop-blur-xl">
+      {/* Show Only Strong Signals toggle */}
+      <div className="flex items-center justify-end gap-3 px-1">
+        <Label
+          htmlFor="strong-only"
+          className="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer"
+        >
+          Show Only Strong Signals
+        </Label>
+        <Switch
+          id="strong-only"
+          checked={strongOnly}
+          onCheckedChange={setStrongOnly}
+          data-testid="switch-strong-only"
+        />
+      </div>
+
+      {/* STRONG SIGNALS — High Priority */}
+      <Card
+        className="border-success/30 bg-card/80 backdrop-blur-xl shadow-[0_0_30px_rgba(22,163,74,0.06)]"
+        data-testid="table-strong"
+      >
         <CardHeader className="pb-4">
           <div className="flex items-center gap-2">
             <Flame className="h-4 w-4 text-success" />
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Tradable Signals
+            <CardTitle className="text-sm font-bold text-success uppercase tracking-wider">
+              Strong Signals
             </CardTitle>
             <Badge
               variant="outline"
-              className="border-white/10 bg-white/5 text-muted-foreground py-0 text-[10px] ml-1"
+              className="border-success/40 bg-success/10 text-success py-0 text-[10px] ml-1"
             >
-              {tradableRows.length}
+              {strongRows.length}
             </Badge>
             <span className="text-[10px] text-muted-foreground/70 ml-auto">
-              STRONG + NORMAL · sorted by confidence
+              Confidence ≥ 65 · High Priority
             </span>
           </div>
         </CardHeader>
-        <CardContent className="p-0" data-testid="table-tradable">
-          <SignalTable
-            rows={tradableRows}
-            emptyMessage="No tradable signals yet"
-          />
+        <CardContent className="p-0">
+          <SignalTable rows={strongRows} emptyMessage="No strong signals yet" />
         </CardContent>
       </Card>
 
-      {/* Weak Signals Table */}
-      <Card className="border-white/10 bg-card/80 backdrop-blur-xl">
-        <CardHeader className="pb-4">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-destructive/80" />
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Weak Signals
-            </CardTitle>
-            <Badge
-              variant="outline"
-              className="border-white/10 bg-white/5 text-muted-foreground py-0 text-[10px] ml-1"
-            >
-              {weakRows.length}
-            </Badge>
-            <span className="text-[10px] text-muted-foreground/70 ml-auto">
-              Confidence 40–49% · low priority
-            </span>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0" data-testid="table-weak">
-          <SignalTable rows={weakRows} emptyMessage="No weak signals" />
-        </CardContent>
-      </Card>
+      {/* MODERATE SIGNALS */}
+      {!strongOnly && (
+        <Card className="border-warning/20 bg-card/80 backdrop-blur-xl" data-testid="table-moderate">
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-warning" />
+              <CardTitle className="text-sm font-bold text-warning uppercase tracking-wider">
+                Moderate Signals
+              </CardTitle>
+              <Badge
+                variant="outline"
+                className="border-warning/40 bg-warning/10 text-warning py-0 text-[10px] ml-1"
+              >
+                {moderateRows.length}
+              </Badge>
+              <span className="text-[10px] text-muted-foreground/70 ml-auto">
+                Confidence 50–64 · Medium Priority
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <SignalTable rows={moderateRows} emptyMessage="No moderate signals" />
+          </CardContent>
+        </Card>
+      )}
 
-      {/* All Signals Table with filter buttons */}
-      <Card className="border-white/10 bg-card/80 backdrop-blur-xl flex flex-col">
-        <CardHeader className="pb-4">
-          <div className="flex items-center gap-2 flex-wrap">
-            <History className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              All Signals
-            </CardTitle>
-            <div className="ml-auto flex items-center gap-1 bg-secondary p-1 rounded-lg border border-white/5">
-              {(["ALL", "STRONG", "NORMAL", "WEAK"] as FilterMode[]).map(f => (
-                <Button
-                  key={f}
-                  variant={filter === f ? "default" : "ghost"}
-                  size="sm"
-                  className={cn(
-                    "h-7 px-3 text-[11px] font-bold tracking-wider gap-1",
-                    filter !== f && "text-muted-foreground hover:text-foreground",
-                  )}
-                  onClick={() => setFilter(f)}
-                  data-testid={`button-filter-${f.toLowerCase()}`}
-                >
-                  {f === "STRONG" && <Flame className="h-3 w-3" />}
-                  {f === "NORMAL" && <Zap className="h-3 w-3" />}
-                  {f === "WEAK" && <AlertTriangle className="h-3 w-3" />}
-                  {f}
-                  <span className="opacity-60 font-normal">({filterCounts[f]})</span>
-                </Button>
-              ))}
+      {/* WEAK SIGNALS */}
+      {!strongOnly && (
+        <Card className="border-white/5 bg-card/40 backdrop-blur-xl" data-testid="table-weak">
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive/70" />
+              <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
+                Weak Signals
+              </CardTitle>
+              <Badge
+                variant="outline"
+                className="border-white/10 bg-white/5 text-muted-foreground py-0 text-[10px] ml-1"
+              >
+                {weakRows.length}
+              </Badge>
+              <span className="text-[10px] text-muted-foreground/70 ml-auto">
+                Confidence 35–49 · Low Priority
+              </span>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0 relative" data-testid="table-all">
-          {!data || allRows.length === 0 ? (
-            <div className="p-12 text-center text-muted-foreground flex flex-col items-center justify-center">
-              <Clock className="h-8 w-8 mb-3 opacity-50" />
-              <p>No trading history available</p>
-            </div>
-          ) : (
-            <SignalTable
-              rows={filteredAllRows}
-              emptyMessage={`No ${filter.toLowerCase()} signals`}
-            />
-          )}
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CardContent className="p-0">
+            <SignalTable rows={weakRows} emptyMessage="No weak signals" faded />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

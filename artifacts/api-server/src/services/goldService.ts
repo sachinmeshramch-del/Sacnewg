@@ -129,18 +129,19 @@ export interface HistoryItem {
   outcome: "WIN" | "LOSS" | "PENDING" | null;
   permission?: "ACTIONABLE" | "QUALIFIED" | "WATCHLIST" | "BLOCKED";
   signalStatus?: "CONFIRMED" | "PENDING";
-  // Confidence-derived classification used by the UI to split tradable signals
-  // from weak ones. STRONG ≥ 65, NORMAL ≥ 50, WEAK ≥ 40, IGNORE below.
-  signalType?: "STRONG" | "NORMAL" | "WEAK" | "IGNORE";
+  // Confidence-derived classification used by the UI to split signals into
+  // STRONG / MODERATE / WEAK tables. STRONG ≥ 65, MODERATE ≥ 50, WEAK ≥ 35,
+  // IGNORE below 35.
+  signalType?: "STRONG" | "MODERATE" | "WEAK" | "IGNORE";
 }
 
 /** Classify a signal by its confidence score. */
 export function classifySignalByConfidence(
   confidence: number,
-): "STRONG" | "NORMAL" | "WEAK" | "IGNORE" {
+): "STRONG" | "MODERATE" | "WEAK" | "IGNORE" {
   if (confidence >= 65) return "STRONG";
-  if (confidence >= 50) return "NORMAL";
-  if (confidence >= 40) return "WEAK";
+  if (confidence >= 50) return "MODERATE";
+  if (confidence >= 35) return "WEAK";
   return "IGNORE";
 }
 
@@ -2526,6 +2527,23 @@ function addToHistory(signal: SignalResult) {
   // have no direction and would just clutter the list.
   if (signal.signal !== "BUY" && signal.signal !== "SELL") return;
 
+  const strength = classifySignalByConfidence(signal.confidence);
+
+  // Drop sub-threshold noise (confidence < 35).
+  if (strength === "IGNORE") return;
+
+  // Storage filter for non-STRONG signals only — STRONG signals are *always*
+  // stored regardless of MTF / market mode (they cannot be suppressed by
+  // pullback / volume / sideways gates per spec).
+  if (strength !== "STRONG") {
+    const mtfOk =
+      signal.mtfStatus === "SUPPORTIVE" ||
+      signal.mtfStatus === "ALIGNED" ||
+      signal.signalStatus === "CONFIRMED";
+    if (!mtfOk) return;
+    if (signal.marketMode === "SIDEWAYS") return;
+  }
+
   // Dedup: if the most recent entry for the same timeframe already has the
   // same direction + permission + status within the last 2 minutes, skip it.
   // The signal cache TTL is 10–20s so without this we'd accumulate identical
@@ -2554,7 +2572,7 @@ function addToHistory(signal: SignalResult) {
     outcome: "PENDING",
     permission: signal.permission,
     signalStatus: signal.signalStatus,
-    signalType: classifySignalByConfidence(signal.confidence),
+    signalType: strength,
   };
   signalHistory.unshift(item);
   if (signalHistory.length > 50) signalHistory = signalHistory.slice(0, 50);

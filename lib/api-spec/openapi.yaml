@@ -444,8 +444,8 @@ components:
           enum: [CONFIRMED, PENDING]
         signalType:
           type: string
-          enum: [STRONG, NORMAL, WEAK, IGNORE]
-          description: Confidence-derived classification. STRONG ≥ 65, NORMAL ≥ 50, WEAK ≥ 40, IGNORE below.
+          enum: [STRONG, MODERATE, WEAK, IGNORE]
+          description: Confidence-derived classification. STRONG ≥ 65, MODERATE ≥ 50, WEAK ≥ 35, IGNORE below.
       required: [id, signal, confidence, entry, stopLoss, takeProfit, trend, timeframe, timestamp]
 
     HistoryResponse:

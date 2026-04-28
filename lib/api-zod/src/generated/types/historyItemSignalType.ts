@@ -7,14 +7,14 @@
  */
 
 /**
- * Confidence-derived classification. STRONG ≥ 65, NORMAL ≥ 50, WEAK ≥ 40, IGNORE below.
+ * Confidence-derived classification. STRONG ≥ 65, MODERATE ≥ 50, WEAK ≥ 35, IGNORE below.
  */
 export type HistoryItemSignalType =
   (typeof HistoryItemSignalType)[keyof typeof HistoryItemSignalType];
 
 export const HistoryItemSignalType = {
   STRONG: "STRONG",
-  NORMAL: "NORMAL",
+  MODERATE: "MODERATE",
   WEAK: "WEAK",
   IGNORE: "IGNORE",
 } as const;

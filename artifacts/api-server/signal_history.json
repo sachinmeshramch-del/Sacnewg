@@ -1,6 +1,51 @@
 {
   "items": [
     {
+      "id": 60,
+      "signal": "BUY",
+      "confidence": 20,
+      "entry": 4599.4,
+      "stopLoss": 4596.84,
+      "takeProfit": 4605.03,
+      "trend": "BULLISH",
+      "timeframe": "5m",
+      "timestamp": "2026-04-28T19:44:05.483Z",
+      "outcome": "PENDING",
+      "permission": "WATCHLIST",
+      "signalStatus": "CONFIRMED",
+      "signalType": "IGNORE"
+    },
+    {
+      "id": 59,
+      "signal": "BUY",
+      "confidence": 20,
+      "entry": 4598.6,
+      "stopLoss": 4596.08,
+      "takeProfit": 4604.15,
+      "trend": "BULLISH",
+      "timeframe": "5m",
+      "timestamp": "2026-04-28T19:42:00.497Z",
+      "outcome": "PENDING",
+      "permission": "WATCHLIST",
+      "signalStatus": "CONFIRMED",
+      "signalType": "IGNORE"
+    },
+    {
+      "id": 58,
+      "signal": "BUY",
+      "confidence": 20,
+      "entry": 4598.2,
+      "stopLoss": 4595.65,
+      "takeProfit": 4603.81,
+      "trend": "BULLISH",
+      "timeframe": "5m",
+      "timestamp": "2026-04-28T19:39:07.747Z",
+      "outcome": "PENDING",
+      "permission": "WATCHLIST",
+      "signalStatus": "CONFIRMED",
+      "signalType": "IGNORE"
+    },
+    {
       "id": 57,
       "signal": "BUY",
       "confidence": 20,
@@ -572,43 +617,7 @@
       "timeframe": "5m",
       "timestamp": "2026-04-22T18:42:17.031Z",
       "outcome": "PENDING"
-    },
-    {
-      "id": 10,
-      "signal": "BUY",
-      "confidence": 55,
-      "entry": 4736.43,
-      "stopLoss": 4717.48,
-      "takeProfit": 4764.85,
-      "trend": "BULLISH",
-      "timeframe": "5m",
-      "timestamp": "2026-04-22T18:39:12.906Z",
-      "outcome": "PENDING"
-    },
-    {
-      "id": 9,
-      "signal": "BUY",
-      "confidence": 55,
-      "entry": 4734.55,
-      "stopLoss": 4715.61,
-      "takeProfit": 4762.96,
-      "trend": "BULLISH",
-      "timeframe": "5m",
-      "timestamp": "2026-04-22T18:34:01.096Z",
-      "outcome": "PENDING"
-    },
-    {
-      "id": 8,
-      "signal": "BUY",
-      "confidence": 60,
-      "entry": 4730.67,
-      "stopLoss": 4711.75,
-      "takeProfit": 4759.05,
-      "trend": "BULLISH",
-      "timeframe": "5m",
-      "timestamp": "2026-04-22T18:28:36.814Z",
-      "outcome": "PENDING"
     }
   ],
-  "counter": 58
+  "counter": 61
 }
