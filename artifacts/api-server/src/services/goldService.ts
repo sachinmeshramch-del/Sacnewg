@@ -127,6 +127,8 @@ export interface HistoryItem {
   timeframe: string;
   timestamp: string;
   outcome: "WIN" | "LOSS" | "PENDING" | null;
+  permission?: "ACTIONABLE" | "QUALIFIED" | "WATCHLIST" | "BLOCKED";
+  signalStatus?: "CONFIRMED" | "PENDING";
 }
 
 // ── History Persistence ────────────────────────────────────────────────────────
@@ -2494,13 +2496,11 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     signal5mExpiry  = Date.now() + signalTtl;
   }
 
-  // Only confirmed AND tradable signals enter history. CONFLICT/SETUP are
-  // informational; WATCHLIST/BLOCKED have no real entry levels to track.
-  if (
-    (result.signal === "BUY" || result.signal === "SELL") &&
-    result.signalStatus === "CONFIRMED" &&
-    (result.permission === "QUALIFIED" || result.permission === "ACTIONABLE")
-  ) {
+  // Any directional signal enters history — including PENDING ("not started")
+  // and WATCHLIST setups — so the user can see every signal the engine fires,
+  // not just the ones it deems immediately tradable. SETUP / CONFLICT / HOLD
+  // have no direction and are still skipped inside addToHistory.
+  if (result.signal === "BUY" || result.signal === "SELL") {
     addToHistory(result);
   }
 
@@ -2509,8 +2509,25 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
 
 // ── History ────────────────────────────────────────────────────────────────────
 function addToHistory(signal: SignalResult) {
-  // History only stores tradable BUY/SELL/HOLD outcomes — SETUP/CONFLICT are informational.
-  if (signal.signal === "SETUP" || signal.signal === "CONFLICT") return;
+  // History only stores directional BUY/SELL outcomes — SETUP/CONFLICT/HOLD
+  // have no direction and would just clutter the list.
+  if (signal.signal !== "BUY" && signal.signal !== "SELL") return;
+
+  // Dedup: if the most recent entry for the same timeframe already has the
+  // same direction + permission + status within the last 2 minutes, skip it.
+  // The signal cache TTL is 10–20s so without this we'd accumulate identical
+  // PENDING/WATCHLIST entries every refresh cycle.
+  const last = signalHistory.find(h => h.timeframe === signal.timeframe);
+  if (
+    last &&
+    last.signal === signal.signal &&
+    last.permission === signal.permission &&
+    last.signalStatus === signal.signalStatus &&
+    Date.now() - new Date(last.timestamp).getTime() < 2 * 60 * 1000
+  ) {
+    return;
+  }
+
   const item: HistoryItem = {
     id: historyIdCounter++,
     signal: signal.signal,
@@ -2522,11 +2539,20 @@ function addToHistory(signal: SignalResult) {
     timeframe: signal.timeframe,
     timestamp: signal.timestamp,
     outcome: "PENDING",
+    permission: signal.permission,
+    signalStatus: signal.signalStatus,
   };
   signalHistory.unshift(item);
   if (signalHistory.length > 50) signalHistory = signalHistory.slice(0, 50);
   saveHistory();
-  setTimeout(() => resolveOutcome(item.id, signal.entry, signal.stopLoss, signal.takeProfit, signal.signal), 5 * 60 * 1000);
+  // Only schedule outcome resolution for tradable signals — PENDING/WATCHLIST
+  // entries don't represent an active trade so their outcome stays "PENDING".
+  if (
+    signal.signalStatus === "CONFIRMED" &&
+    (signal.permission === "QUALIFIED" || signal.permission === "ACTIONABLE")
+  ) {
+    setTimeout(() => resolveOutcome(item.id, signal.entry, signal.stopLoss, signal.takeProfit, signal.signal), 5 * 60 * 1000);
+  }
 }
 
 async function resolveOutcome(id: number, entry: number, sl: number, tp: number, signalType: string) {

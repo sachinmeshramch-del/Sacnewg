@@ -518,59 +518,43 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
             </div>
 
             {/* Trade Parameters — Entry, SL, TP1 (partial), TP2 (final).
-                Only shown when permission is QUALIFIED or ACTIONABLE. WATCHLIST
-                and BLOCKED states hide the trade card entirely so the user
-                isn't tempted to act on a non-tradable setup. */}
-            {(data.permission === "QUALIFIED" || data.permission === "ACTIONABLE") ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                  <Target className="h-4 w-4 text-blue-400 mb-2" />
-                  <span className="text-[10px] uppercase text-muted-foreground mb-1">Entry</span>
-                  <span className="font-numbers font-bold text-foreground text-sm">
-                    {data.entry ? `$${data.entry.toFixed(2)}` : "N/A"}
-                  </span>
-                </div>
-                <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                  <ShieldAlert className="h-4 w-4 text-destructive mb-2" />
-                  <span className="text-[10px] uppercase text-muted-foreground mb-1">Stop Loss</span>
-                  <span className="font-numbers font-bold text-destructive text-sm">
-                    {data.stopLoss ? `$${data.stopLoss.toFixed(2)}` : "N/A"}
-                  </span>
-                  <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.0× ATR</span>
-                </div>
-                <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                  <Coins className="h-4 w-4 text-success/80 mb-2" />
-                  <span className="text-[10px] uppercase text-muted-foreground mb-1">TP1 · Partial</span>
-                  <span className="font-numbers font-bold text-success/85 text-sm">
-                    {data.tp1 ? `$${data.tp1.toFixed(2)}` : "—"}
-                  </span>
-                  <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.2 R</span>
-                </div>
-                <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-success/5 border border-success/20">
-                  <Coins className="h-4 w-4 text-success mb-2" />
-                  <span className="text-[10px] uppercase text-muted-foreground mb-1">TP2 · Final</span>
-                  <span className="font-numbers font-bold text-success text-sm">
-                    {data.tp2 ? `$${data.tp2.toFixed(2)}` : (data.takeProfit ? `$${data.takeProfit.toFixed(2)}` : "N/A")}
-                  </span>
-                  <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">2.2 R</span>
-                </div>
-              </div>
-            ) : (
-              /* Non-tradable state — replace the trade card with a clean
-                 "no levels yet" placeholder. Communicates clearly why no
-                 entry/SL/TP is shown without leaving an empty space. */
-              <div className="rounded-xl bg-white/[0.02] border border-white/5 px-4 py-5 flex flex-col items-center text-center gap-1.5">
-                <ShieldAlert className="h-4 w-4 text-muted-foreground/60" />
-                <span className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-semibold">
-                  No trade levels
-                </span>
-                <span className="text-[10px] text-muted-foreground/60 max-w-[280px]">
-                  {data.permission === "WATCHLIST"
-                    ? "Watchlist only — context shown above. Wait for confirmation before acting."
-                    : "Setup is not tradable right now. Stand aside until conditions improve."}
+                Always shown so the user can see what the trade WOULD look like
+                even on WATCHLIST / BLOCKED setups. The permission badge above
+                the card already communicates whether the setup is actionable
+                or just informational, so we never hide the levels themselves. */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                <Target className="h-4 w-4 text-blue-400 mb-2" />
+                <span className="text-[10px] uppercase text-muted-foreground mb-1">Entry</span>
+                <span className="font-numbers font-bold text-foreground text-sm">
+                  {data.entry ? `$${data.entry.toFixed(2)}` : "—"}
                 </span>
               </div>
-            )}
+              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                <ShieldAlert className="h-4 w-4 text-destructive mb-2" />
+                <span className="text-[10px] uppercase text-muted-foreground mb-1">Stop Loss</span>
+                <span className="font-numbers font-bold text-destructive text-sm">
+                  {data.stopLoss ? `$${data.stopLoss.toFixed(2)}` : "—"}
+                </span>
+                <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.0× ATR</span>
+              </div>
+              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                <Coins className="h-4 w-4 text-success/80 mb-2" />
+                <span className="text-[10px] uppercase text-muted-foreground mb-1">TP1 · Partial</span>
+                <span className="font-numbers font-bold text-success/85 text-sm">
+                  {data.tp1 ? `$${data.tp1.toFixed(2)}` : "—"}
+                </span>
+                <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">1.2 R</span>
+              </div>
+              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-success/5 border border-success/20">
+                <Coins className="h-4 w-4 text-success mb-2" />
+                <span className="text-[10px] uppercase text-muted-foreground mb-1">TP2 · Final</span>
+                <span className="font-numbers font-bold text-success text-sm">
+                  {data.tp2 ? `$${data.tp2.toFixed(2)}` : (data.takeProfit ? `$${data.takeProfit.toFixed(2)}` : "—")}
+                </span>
+                <span className="text-[9px] uppercase text-muted-foreground/60 mt-1">2.2 R</span>
+              </div>
+            </div>
 
             {/* Footer */}
             <div className="flex items-center justify-between pt-3 border-t border-white/5">

@@ -263,6 +263,10 @@ export const GetHistoryResponse = zod.object({
       timeframe: zod.string(),
       timestamp: zod.date(),
       outcome: zod.enum(["WIN", "LOSS", "PENDING"]).nullish(),
+      permission: zod
+        .enum(["ACTIONABLE", "QUALIFIED", "WATCHLIST", "BLOCKED"])
+        .optional(),
+      signalStatus: zod.enum(["CONFIRMED", "PENDING"]).optional(),
     }),
   ),
   total: zod.number(),

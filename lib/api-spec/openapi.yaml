@@ -436,6 +436,12 @@ components:
           type: string
           enum: [WIN, LOSS, PENDING]
           nullable: true
+        permission:
+          type: string
+          enum: [ACTIONABLE, QUALIFIED, WATCHLIST, BLOCKED]
+        signalStatus:
+          type: string
+          enum: [CONFIRMED, PENDING]
       required: [id, signal, confidence, entry, stopLoss, takeProfit, trend, timeframe, timestamp]
 
     HistoryResponse:

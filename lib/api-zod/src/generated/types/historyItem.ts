@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { HistoryItemOutcome } from "./historyItemOutcome";
+import type { HistoryItemPermission } from "./historyItemPermission";
 import type { HistoryItemSignal } from "./historyItemSignal";
+import type { HistoryItemSignalStatus } from "./historyItemSignalStatus";
 
 export interface HistoryItem {
   id: number;
@@ -19,4 +21,6 @@ export interface HistoryItem {
   timeframe: string;
   timestamp: Date;
   outcome?: HistoryItemOutcome;
+  permission?: HistoryItemPermission;
+  signalStatus?: HistoryItemSignalStatus;
 }

@@ -428,6 +428,24 @@ export const HistoryItemOutcome = {
   PENDING: "PENDING",
 } as const;
 
+export type HistoryItemPermission =
+  (typeof HistoryItemPermission)[keyof typeof HistoryItemPermission];
+
+export const HistoryItemPermission = {
+  ACTIONABLE: "ACTIONABLE",
+  QUALIFIED: "QUALIFIED",
+  WATCHLIST: "WATCHLIST",
+  BLOCKED: "BLOCKED",
+} as const;
+
+export type HistoryItemSignalStatus =
+  (typeof HistoryItemSignalStatus)[keyof typeof HistoryItemSignalStatus];
+
+export const HistoryItemSignalStatus = {
+  CONFIRMED: "CONFIRMED",
+  PENDING: "PENDING",
+} as const;
+
 export interface HistoryItem {
   id: number;
   signal: HistoryItemSignal;
@@ -439,6 +457,8 @@ export interface HistoryItem {
   timeframe: string;
   timestamp: string;
   outcome?: HistoryItemOutcome;
+  permission?: HistoryItemPermission;
+  signalStatus?: HistoryItemSignalStatus;
 }
 
 export interface HistoryResponse {
