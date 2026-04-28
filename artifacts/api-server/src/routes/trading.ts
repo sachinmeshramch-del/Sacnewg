@@ -48,10 +48,13 @@ router.get("/history", (_req, res) => {
   }
 });
 
-router.delete("/history", (_req, res) => {
+router.delete("/history", (req, res) => {
   try {
-    const result = clearHistory();
-    res.json({ success: true, ...result });
+    const raw = (req.query.strength as string | undefined)?.toUpperCase();
+    const strength =
+      raw === "STRONG" || raw === "MODERATE" || raw === "WEAK" ? raw : undefined;
+    const result = clearHistory(strength);
+    res.json({ success: true, strength: strength ?? "ALL", ...result });
   } catch (err) {
     console.error("Clear history error:", err);
     res.status(500).json({ error: "Failed to clear history" });

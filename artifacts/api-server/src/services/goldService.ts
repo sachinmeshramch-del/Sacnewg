@@ -2633,12 +2633,24 @@ export function getHistory(): { signals: HistoryItem[]; total: number } {
   return { signals, total: signals.length };
 }
 
-export function clearHistory(): { cleared: number } {
-  const count = signalHistory.length;
-  signalHistory = [];
-  historyIdCounter = 1;
+export function clearHistory(
+  strength?: "STRONG" | "MODERATE" | "WEAK",
+): { cleared: number } {
+  if (!strength) {
+    const count = signalHistory.length;
+    signalHistory = [];
+    historyIdCounter = 1;
+    saveHistory();
+    return { cleared: count };
+  }
+  const before = signalHistory.length;
+  signalHistory = signalHistory.filter(h => {
+    const tier = h.signalType ?? classifySignalByConfidence(h.confidence);
+    return tier !== strength;
+  });
+  const cleared = before - signalHistory.length;
   saveHistory();
-  return { cleared: count };
+  return { cleared };
 }
 
 export { getSessionName };

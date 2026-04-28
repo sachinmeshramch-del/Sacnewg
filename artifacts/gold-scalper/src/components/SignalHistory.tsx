@@ -182,20 +182,72 @@ function SignalTable({
 export function SignalHistory() {
   const { data, isLoading } = useSignalHistory();
   const [strongOnly, setStrongOnly] = useState(false);
-  const [clearing, setClearing] = useState(false);
+  const [clearingTier, setClearingTier] = useState<Exclude<Strength, "IGNORE"> | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  async function handleClear() {
-    setClearing(true);
+  function ClearTierButton({
+    tier,
+    count,
+    label,
+  }: {
+    tier: Exclude<Strength, "IGNORE">;
+    count: number;
+    label: string;
+  }) {
+    const isClearing = clearingTier === tier;
+    return (
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-muted-foreground/70 hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
+            disabled={isClearing || count === 0}
+            data-testid={`button-clear-${tier.toLowerCase()}`}
+            title={`Clear ${label} signals`}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span className="text-[10px] uppercase tracking-wider hidden sm:inline">
+              {isClearing ? "Clearing" : "Clear"}
+            </span>
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent data-testid={`dialog-clear-${tier.toLowerCase()}`}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear {label.toLowerCase()} signals?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete all {count} signal{count === 1 ? "" : "s"}{" "}
+              from the {label} table. Other tables won't be affected. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid={`button-cancel-clear-${tier.toLowerCase()}`}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => handleClear(tier)}
+              className="bg-sky-600 text-white hover:bg-sky-500"
+              data-testid={`button-confirm-clear-${tier.toLowerCase()}`}
+            >
+              Yes, clear {label}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
+
+  async function handleClear(tier: Exclude<Strength, "IGNORE">) {
+    setClearingTier(tier);
     try {
-      const res = await fetch("/api/history", { method: "DELETE" });
+      const res = await fetch(`/api/history?strength=${tier}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as { cleared?: number };
       await queryClient.invalidateQueries({ queryKey: getGetHistoryQueryKey() });
       toast({
-        title: "History cleared",
-        description: `Removed ${json.cleared ?? 0} signals from all tables.`,
+        title: `${tier} signals cleared`,
+        description: `Removed ${json.cleared ?? 0} signals from the ${tier.toLowerCase()} table.`,
       });
     } catch (err) {
       toast({
@@ -204,7 +256,7 @@ export function SignalHistory() {
         variant: "destructive",
       });
     } finally {
-      setClearing(false);
+      setClearingTier(null);
     }
   }
 
@@ -258,59 +310,20 @@ export function SignalHistory() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Toolbar: Clear button + Strong-only toggle */}
-      <div className="flex items-center justify-end gap-4 px-1 flex-wrap">
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-2 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              disabled={clearing || (allRows.length === 0)}
-              data-testid="button-clear-history"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span className="text-xs uppercase tracking-wider">
-                {clearing ? "Clearing..." : "Clear History"}
-              </span>
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent data-testid="dialog-clear-history">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Clear all signal history?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently delete every signal from the STRONG, MODERATE,
-                and WEAK tables. New signals will start populating again as the
-                market triggers them. This cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel data-testid="button-cancel-clear">Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleClear}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                data-testid="button-confirm-clear"
-              >
-                Yes, clear all
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        <div className="flex items-center gap-3">
-          <Label
-            htmlFor="strong-only"
-            className="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer"
-          >
-            Show Only Strong Signals
-          </Label>
-          <Switch
-            id="strong-only"
-            checked={strongOnly}
-            onCheckedChange={setStrongOnly}
-            data-testid="switch-strong-only"
-          />
-        </div>
+      {/* Toolbar: Strong-only toggle (per-table clear buttons live in each card) */}
+      <div className="flex items-center justify-end gap-3 px-1">
+        <Label
+          htmlFor="strong-only"
+          className="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer"
+        >
+          Show Only Strong Signals
+        </Label>
+        <Switch
+          id="strong-only"
+          checked={strongOnly}
+          onCheckedChange={setStrongOnly}
+          data-testid="switch-strong-only"
+        />
       </div>
 
       {/* STRONG SIGNALS — High Priority */}
@@ -333,6 +346,7 @@ export function SignalHistory() {
             <span className="text-[10px] text-muted-foreground/70 ml-auto">
               Confidence ≥ 65 · High Priority
             </span>
+            <ClearTierButton tier="STRONG" count={strongRows.length} label="Strong" />
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -358,6 +372,7 @@ export function SignalHistory() {
               <span className="text-[10px] text-muted-foreground/70 ml-auto">
                 Confidence 50–64 · Medium Priority
               </span>
+              <ClearTierButton tier="MODERATE" count={moderateRows.length} label="Moderate" />
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -382,8 +397,9 @@ export function SignalHistory() {
                 {weakRows.length}
               </Badge>
               <span className="text-[10px] text-muted-foreground/70 ml-auto">
-                Confidence 35–49 · Low Priority
+                Confidence 0–49 · Low Priority
               </span>
+              <ClearTierButton tier="WEAK" count={weakRows.length} label="Weak" />
             </div>
           </CardHeader>
           <CardContent className="p-0">
