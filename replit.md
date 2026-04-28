@@ -93,7 +93,9 @@ Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHea
 
 ### `artifacts/gold-scalper` (`@workspace/gold-scalper`)
 
-React + Vite web app at `/` (port 23682). Gold Scalper AI — 5-15 minute scalping signals using RSI/EMA9/EMA21/MACD/ATR. Features live Yahoo Finance price, TradingView chart widget, signal history, risk calculator, Telegram alerts.
+React + Vite web app at `/` (port 5000). Gold Scalper AI — 5-15 minute scalping signals using RSI/EMA9/EMA21/MACD/ATR. Features live Yahoo Finance price, TradingView chart widget, signal history, risk calculator, Telegram alerts.
+
+**Dev proxy** (`vite.config.ts`): `/api` is proxied to `http://localhost:8080` (or `API_PROXY_TARGET`) so the SPA uses relative URLs. Workflow runs both servers together (`PORT=8080` for api-server + `PORT=5000` for the SPA), and Replit's preview hits port 5000 directly.
 
 **Pullback Entry Engine** (`artifacts/api-server/src/services/goldService.ts`): WEAK trend states no longer fire random "near EMA20" entries. Instead, the engine waits for: (1) price inside the EMA20 ± ATR×0.5 zone (clamped 3–6 pts) → `zoneStatus` = `BUY_ZONE`/`SELL_ZONE`; (2) a rejection candle (wick ≥ 1.5× body, matching close direction, real body) → `pullbackConfirmation` = `REJECTION_DETECTED`; (3) RSI inside 40–55 (BUY) or 45–60 (SELL). On confirmation, fires with `signalLabel = BUY_PULLBACK` / `SELL_PULLBACK` and confidence ≥ 70. The MTF + active-trade + EXHAUSTED filters from `applyFilters` still apply on top. The UI shows live "Pullback Zone" / "Confirmation" status badges in `SignalPanel.tsx` regardless of trend strength.
 
@@ -120,7 +122,24 @@ UI (`SignalPanel.tsx`) renders new badges: an inline `BULLISH PULLBACK` / `BEARI
 
 UI gating (`SignalPanel.tsx`): renders the Permission + Market Regime + (optional) chop badges row right under the big signal pill; renders the `bannerMessage` and up to 3 `conflictReasons` when MIXED+. Trade-levels grid (Entry/SL/TP1/TP2) is replaced with a "No trade levels" placeholder when permission ∉ {QUALIFIED, ACTIONABLE}. Pullback Zone label de-emphasises BUY/SELL ZONE to "Candidate buy/sell area" until qualified.
 
-**Tests**: `artifacts/api-server/src/services/__tests__/signal-engine.test.ts` — standalone tsx-runnable file with 4 fixtures (mixed+neutral HTF=WATCHLIST, full bearish=ACTIONABLE/QUALIFIED, bullish reversal=QUALIFIED, choppy=BLOCKED). Run via `pnpm --filter @workspace/api-server exec tsx src/services/__tests__/signal-engine.test.ts`.
+**Score-Based Decision Engine** (`runScoreEngine` in `goldService.ts`, replaces the old `generateSignal → applyMtfConfirmation → applyFilters` chain). No more hard-blocking conditions — every check contributes a weighted vote and the strongest direction wins:
+
+| Axis | Vote | Source |
+|------|-----:|--------|
+| EMA stack agrees | +2 | EMA20 vs EMA50 |
+| HTF (15m) supportive / contra | ±2 | `classifyMtfAlignment` → `SUPPORTIVE` / `NEUTRAL` / `CONTRA` |
+| Trend memory | +1 | momentum bias matches direction |
+| Pullback into EMA20 zone | +2 | `inExpandedPullbackZone` |
+| Rejection/confirmation candle | +2 | wick ≥ 1.5× body, persisted via `trackConfirmationPersistence` |
+| Strong breakout | +2 | break of last-20 high/low (fallback when no pullback) |
+| Fake breakout / trap override | -2 (and forces side flip) | trap detector |
+| Volatility spike | -1 | volume > 1.5× 20-bar average |
+
+Strength buckets: **STRONG ≥ 5**, **NORMAL ≥ 3**, **WEAK ≥ 2**, anything below = HOLD. `confidence = clamp(round((score / 10) * 100), 5, 95)`. Direction is picked from the signed score per axis. Trap override forces the opposite side and floors score ≥ 3. Soft risk filters (`applySoftRiskFilters`) still enforce active-trade slot, cooldown, and anti-stack — these are the only remaining hard blocks. Output adds `signalStrength`, `score`, and `scoreBreakdown` (per-axis numbers) on top of the existing `SignalResult`. UI labels surface as `STRONG BUY · PULLBACK · HTF SUPPORTIVE` / `WEAK SELL · BREAKOUT · HTF CONTRA` etc.
+
+**Permission relaxation**: `derivePermission` ACTIONABLE threshold dropped to confidence ≥ 60 (was 75); CONFLICT promotion now requires SEVERE conflict AND score < 3; chop / mixed / CONTRA all fall back to **WATCHLIST** (with levels still visible) instead of BLOCKED. Levels are stripped only when permission is BLOCKED.
+
+**Tests**: `artifacts/api-server/src/services/__tests__/signal-engine.test.ts` — standalone tsx-runnable file with 4 fixtures: (1) mixed + neutral HTF → QUALIFIED with banner, (2) full bearish → ACTIONABLE at conf 82 / QUALIFIED at conf 55, (3) bullish reversal → ACTIONABLE, (4) choppy → WATCHLIST with banner. Run via `pnpm --filter @workspace/api-server exec tsx src/services/__tests__/signal-engine.test.ts`.
 
 ### `artifacts/gold-intraday` (`@workspace/gold-intraday`)
 

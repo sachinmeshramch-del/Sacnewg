@@ -212,7 +212,7 @@ export const ScalperSignalResponseHigherTrend = {
 } as const;
 
 /**
- * WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict; SETUP_FORMING = higher TF trending while entry TF is in a matching pullback.
+ * SUPPORTIVE = 15m trend agrees with entry direction; NEUTRAL = 15m flat; CONTRA = 15m disagrees (trade is allowed but score takes a -2 hit). Legacy WAITING/ALIGNED/BLOCKED/SETUP_FORMING are kept for backwards-compat but the score engine emits SUPPORTIVE/NEUTRAL/CONTRA.
  */
 export type ScalperSignalResponseMtfStatus =
   (typeof ScalperSignalResponseMtfStatus)[keyof typeof ScalperSignalResponseMtfStatus];
@@ -222,7 +222,37 @@ export const ScalperSignalResponseMtfStatus = {
   ALIGNED: "ALIGNED",
   BLOCKED: "BLOCKED",
   SETUP_FORMING: "SETUP_FORMING",
+  SUPPORTIVE: "SUPPORTIVE",
+  NEUTRAL: "NEUTRAL",
+  CONTRA: "CONTRA",
 } as const;
+
+/**
+ * Score-engine strength bucket. >=5 STRONG, >=3 NORMAL, >=2 WEAK, <2 NONE (HOLD).
+ */
+export type ScalperSignalResponseSignalStrength =
+  (typeof ScalperSignalResponseSignalStrength)[keyof typeof ScalperSignalResponseSignalStrength];
+
+export const ScalperSignalResponseSignalStrength = {
+  STRONG: "STRONG",
+  NORMAL: "NORMAL",
+  WEAK: "WEAK",
+  NONE: "NONE",
+} as const;
+
+/**
+ * Per-axis score contributions (EMA, HTF, momentum, pullback, confirmation, breakout, trap, volatility).
+ */
+export type ScalperSignalResponseScoreBreakdown = {
+  ema?: number;
+  htf?: number;
+  momentum?: number;
+  pullback?: number;
+  confirmation?: number;
+  breakout?: number;
+  trap?: number;
+  volatility?: number;
+};
 
 /**
  * EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65.
@@ -333,8 +363,14 @@ export interface ScalperSignalResponse {
   signalType?: ScalperSignalResponseSignalType;
   /** 15m higher-timeframe trend direction used for MTF confirmation. */
   higherTrend?: ScalperSignalResponseHigherTrend;
-  /** WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict; SETUP_FORMING = higher TF trending while entry TF is in a matching pullback. */
+  /** SUPPORTIVE = 15m trend agrees with entry direction; NEUTRAL = 15m flat; CONTRA = 15m disagrees (trade is allowed but score takes a -2 hit). Legacy WAITING/ALIGNED/BLOCKED/SETUP_FORMING are kept for backwards-compat but the score engine emits SUPPORTIVE/NEUTRAL/CONTRA. */
   mtfStatus?: ScalperSignalResponseMtfStatus;
+  /** Score-engine strength bucket. >=5 STRONG, >=3 NORMAL, >=2 WEAK, <2 NONE (HOLD). */
+  signalStrength?: ScalperSignalResponseSignalStrength;
+  /** Weighted setup score, typically -3..+10. Confidence = (score / 10) * 100. */
+  score?: number;
+  /** Per-axis score contributions (EMA, HTF, momentum, pullback, confirmation, breakout, trap, volatility). */
+  scoreBreakdown?: ScalperSignalResponseScoreBreakdown;
   /** EARLY = preemptive trend entry (60-64 confidence); CONFIRMED = full conf ≥ 65. */
   entryQuality?: ScalperSignalResponseEntryQuality;
   /** Detected price-action regime — TRENDING is healthy; EXHAUSTED & REVERSAL_WATCH suppress trend trades. */

@@ -66,6 +66,16 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    // In dev the api-server runs on a different port (8080) — proxy /api calls
+    // through Vite so the SPA can use relative URLs without CORS or hardcoded
+    // ports. API_PROXY_TARGET overrides the default for non-standard setups.
+    proxy: {
+      "/api": {
+        target: process.env.API_PROXY_TARGET ?? "http://localhost:8080",
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
   preview: {
     port,

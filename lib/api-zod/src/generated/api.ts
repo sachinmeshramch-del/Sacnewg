@@ -141,10 +141,45 @@ export const GetSignalResponse = zod.object({
       "15m higher-timeframe trend direction used for MTF confirmation.",
     ),
   mtfStatus: zod
-    .enum(["WAITING", "ALIGNED", "BLOCKED", "SETUP_FORMING"])
+    .enum([
+      "WAITING",
+      "ALIGNED",
+      "BLOCKED",
+      "SETUP_FORMING",
+      "SUPPORTIVE",
+      "NEUTRAL",
+      "CONTRA",
+    ])
     .optional()
     .describe(
-      "WAITING = HOLD\/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict; SETUP_FORMING = higher TF trending while entry TF is in a matching pullback.",
+      "SUPPORTIVE = 15m trend agrees with entry direction; NEUTRAL = 15m flat; CONTRA = 15m disagrees (trade is allowed but score takes a -2 hit). Legacy WAITING\/ALIGNED\/BLOCKED\/SETUP_FORMING are kept for backwards-compat but the score engine emits SUPPORTIVE\/NEUTRAL\/CONTRA.",
+    ),
+  signalStrength: zod
+    .enum(["STRONG", "NORMAL", "WEAK", "NONE"])
+    .optional()
+    .describe(
+      "Score-engine strength bucket. >=5 STRONG, >=3 NORMAL, >=2 WEAK, <2 NONE (HOLD).",
+    ),
+  score: zod
+    .number()
+    .optional()
+    .describe(
+      "Weighted setup score, typically -3..+10. Confidence = (score \/ 10) \* 100.",
+    ),
+  scoreBreakdown: zod
+    .object({
+      ema: zod.number().optional(),
+      htf: zod.number().optional(),
+      momentum: zod.number().optional(),
+      pullback: zod.number().optional(),
+      confirmation: zod.number().optional(),
+      breakout: zod.number().optional(),
+      trap: zod.number().optional(),
+      volatility: zod.number().optional(),
+    })
+    .optional()
+    .describe(
+      "Per-axis score contributions (EMA, HTF, momentum, pullback, confirmation, breakout, trap, volatility).",
     ),
   entryQuality: zod
     .enum(["EARLY", "CONFIRMED"])

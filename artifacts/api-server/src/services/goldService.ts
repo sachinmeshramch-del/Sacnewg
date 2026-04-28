@@ -66,7 +66,25 @@ interface SignalResult {
   signalStatus?: "PENDING" | "CONFIRMED";
   signalType?: "TREND" | "REVERSAL";
   higherTrend?: "BULLISH" | "BEARISH" | "NEUTRAL";
-  mtfStatus?: "WAITING" | "ALIGNED" | "BLOCKED" | "SETUP_FORMING";
+  // mtfStatus: SUPPORTIVE = HTF agrees with entry; NEUTRAL = HTF flat;
+  // CONTRA = HTF disagrees (trade is allowed, just scores -2 on HTF axis).
+  // Legacy values (WAITING/ALIGNED/BLOCKED/SETUP_FORMING) preserved for
+  // backwards compat but the new score engine emits SUPPORTIVE/NEUTRAL/CONTRA.
+  mtfStatus?: "WAITING" | "ALIGNED" | "BLOCKED" | "SETUP_FORMING" | "SUPPORTIVE" | "NEUTRAL" | "CONTRA";
+  // Score-based engine outputs (NEW). signalStrength is the qualitative
+  // bucket; score is the raw 0..10ish weighted total used to derive it.
+  signalStrength?: "STRONG" | "NORMAL" | "WEAK" | "NONE";
+  score?: number;
+  scoreBreakdown?: {
+    ema: number;
+    htf: number;
+    momentum: number;
+    pullback: number;
+    confirmation: number;
+    breakout: number;
+    trap: number;
+    volatility: number;
+  };
   entryQuality?: "EARLY" | "CONFIRMED";
   marketState?: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH";
   blockReason?: string;
@@ -383,6 +401,16 @@ interface ExtendedIndicators extends Indicators {
   // SIDEWAYS classification (prevents false sideways during pullbacks).
   momentumBias: "BULLISH" | "BEARISH" | "NEUTRAL";
   momentumScore: number;
+  // Volume + breakout (NEW — fuels the score-engine breakout fallback).
+  // volumeAvg = mean of prior 20 candle volumes; volumeLast = latest candle
+  // volume; volumeSpike = last > 1.5× avg. strongBreakoutBuy/Sell fire when
+  // the latest candle breaks the prior swing high/low with a wide body and
+  // either a volume spike or an unusually wide range (volume-less fallback).
+  volumeAvg: number;
+  volumeLast: number;
+  volumeSpike: boolean;
+  strongBreakoutBuy: boolean;
+  strongBreakoutSell: boolean;
 }
 
 const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
@@ -642,6 +670,7 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
   const highs  = cleanArray(ohlc.high);
   const lows   = cleanArray(ohlc.low);
   const opens  = cleanArray(ohlc.open);
+  const vols   = (ohlc.volume ?? []).map(v => (typeof v === "number" && v > 0 ? v : 0));
 
   const rsi = calcRSI(closes, 14);
 
@@ -779,6 +808,25 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
   if (zoneStatus === "BUY_ZONE"  && buyRejection)  pullbackConfirmation = "REJECTION_DETECTED";
   if (zoneStatus === "SELL_ZONE" && sellRejection) pullbackConfirmation = "REJECTION_DETECTED";
 
+  // ── Volume spike detection (NEW) ──────────────────────────────────────────
+  // Yahoo intraday volume is sometimes 0 for futures — fall back gracefully.
+  const volSlice = vols.slice(Math.max(0, last - 20), last); // prior 20 bars
+  const volNon0  = volSlice.filter(v => v > 0);
+  const volumeAvg  = volNon0.length ? volNon0.reduce((a, b) => a + b, 0) / volNon0.length : 0;
+  const volumeLast = vols[last] ?? 0;
+  const volumeSpike = volumeAvg > 0 && volumeLast > volumeAvg * 1.5;
+
+  // ── Strong breakout detection (NEW) ──────────────────────────────────────
+  // BUY: closes above the prior swing high with a wide bullish body and
+  // either a volume spike OR (volume missing) a particularly wide range.
+  // SELL is the mirror. Used by the score engine as a pullback fallback.
+  const wideBody     = body >= lastClose * 0.0008;   // body ≥ 0.08% of price
+  const veryWideBody = body >= lastClose * 0.0012;   // 0.12% — used when no vol
+  const breaksRes    = lastClose > smart.swingHigh1 || breaksPrevHigh;
+  const breaksSup    = lastClose < smart.swingLow1  || breaksPrevLow;
+  const strongBreakoutBuy  = breaksRes && lastCandleBullish && wideBody  && (volumeSpike || veryWideBody);
+  const strongBreakoutSell = breaksSup && !lastCandleBullish && wideBody && (volumeSpike || veryWideBody);
+
   return {
     rsi, ema20, ema50,
     macdLine, macdSignal, macdHistogram,
@@ -798,6 +846,11 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     pullbackState,
     momentumBias:   momentum.bias,
     momentumScore:  momentum.score,
+    volumeAvg,
+    volumeLast,
+    volumeSpike,
+    strongBreakoutBuy,
+    strongBreakoutSell,
   };
 }
 
@@ -1316,26 +1369,33 @@ export function derivePermission(
   if (signal === "HOLD" || signal === "CONFLICT") return "BLOCKED";
   if (signal === "SETUP") return "WATCHLIST";
 
-  // Hard blocks first.
-  if (conflictLevel === "SEVERE") return "BLOCKED";
-  if (regime === "CHOPPY")        return "BLOCKED";
-  if (mtfStatus === "BLOCKED")    return "BLOCKED";
+  // Per the score-engine refactor: no more hard BLOCKS on conflict / chop
+  // / mtf CONTRA. Those conditions become quality DOWNGRADES (WATCHLIST or
+  // QUALIFIED rather than BLOCKED), so weak setups still surface trade
+  // levels but with context warnings.
+  if (confidence < 30) return "WATCHLIST";
 
-  // Low confidence is informational only.
-  if (confidence < 60) return "WATCHLIST";
+  // Severe conflict or choppy market — context-only, not a hard block.
+  if (conflictLevel === "SEVERE") return "WATCHLIST";
+  if (regime === "CHOPPY")        return "WATCHLIST";
 
-  // MIXED evidence caps at WATCHLIST regardless of confidence —
-  // shows context, hides trade levels.
-  if (conflictLevel === "MIXED") return "WATCHLIST";
+  // CONTRA HTF (entry against 15m trend) — show levels but mark QUALIFIED
+  // (never ACTIONABLE).
+  const htfContra = mtfStatus === "BLOCKED" || mtfStatus === "CONTRA";
 
-  // HTF neutral cap — needs unusually strong confirmation to trade.
-  if (htf === "NEUTRAL" && confidence < 80) return "QUALIFIED";
+  // MIXED evidence — surface levels but cap at QUALIFIED.
+  if (conflictLevel === "MIXED") {
+    return confidence >= 50 ? "QUALIFIED" : "WATCHLIST";
+  }
 
-  // Everything aligned + confirmed + high conf = full permission.
-  if (signalStatus === "CONFIRMED" && mtfStatus === "ALIGNED" &&
-      confidence >= 75 && conflictLevel === "NONE") {
+  // HTF supportive + confirmed + high conf = full permission.
+  const htfSupportive = mtfStatus === "ALIGNED" || mtfStatus === "SUPPORTIVE";
+  if (signalStatus === "CONFIRMED" && htfSupportive &&
+      confidence >= 60 && conflictLevel === "NONE") {
     return "ACTIONABLE";
   }
+
+  if (htfContra) return "QUALIFIED";
 
   return "QUALIFIED";
 }
@@ -1362,6 +1422,9 @@ export function softenSignalLabel(
   bias:        IndicatorBias,
 ): string | undefined {
   if (!signalLabel) return signalLabel;
+  // Score-engine labels (e.g. "STRONG BUY · PULLBACK · HTF SUPPORTIVE") are
+  // already descriptive — keep them as-is regardless of permission.
+  if (/^(STRONG|NORMAL|WEAK)\s+(BUY|SELL)\s+·/.test(signalLabel)) return signalLabel;
   // Only soften when permission is below tradable. ACTIONABLE / QUALIFIED keep
   // the original engine label.
   if (permission === "ACTIONABLE" || permission === "QUALIFIED") return signalLabel;
@@ -1838,6 +1901,311 @@ export async function getLivePrice(): Promise<PriceData> {
 }
 
 // ── getSignal ──────────────────────────────────────────────────────────────────
+// ── Score-Based Decision Engine (NEW) ─────────────────────────────────────────
+// Replaces the old hard-blocking pipeline (applyMtfConfirmation + applyFilters
+// gating on MTF/pullback/confirmation). Each side (BUY / SELL) earns a
+// weighted score; the higher side wins, the score maps to STRONG / NORMAL /
+// WEAK / NONE, and confidence is just (score / 10) × 100. No condition is a
+// hard gate by itself — they're all weighted contributors.
+//
+// Per spec:
+//   EMA trend matches direction        → +2
+//   Higher TF (15m) matches direction  → +2  (opposite → −2, neutral → 0)
+//   Trend Memory matches direction     → +1
+//   Pullback zone exists for direction → +2  (else 0, NEVER blocks)
+//   Confirmation candle (rejection)    → +2  (else 0, NEVER blocks)
+//   Strong breakout + volume spike     → +2  (alternative to pullback)
+//   Trap against direction             → −2
+//   High volatility spike              → −1
+//   ≥ 5 STRONG · ≥ 3 NORMAL · ≥ 2 WEAK · < 2 HOLD
+type SignalStrengthBucket = "STRONG" | "NORMAL" | "WEAK" | "NONE";
+interface ScoreBreakdown {
+  ema: number;
+  htf: number;
+  momentum: number;
+  pullback: number;
+  confirmation: number;
+  breakout: number;
+  trap: number;
+  volatility: number;
+  total: number;
+}
+
+function classifyMtfAlignment(
+  side: "BUY" | "SELL",
+  htf: HigherTrend,
+): "SUPPORTIVE" | "NEUTRAL" | "CONTRA" {
+  if (htf === "NEUTRAL") return "NEUTRAL";
+  if (side === "BUY"  && htf === "BULLISH") return "SUPPORTIVE";
+  if (side === "SELL" && htf === "BEARISH") return "SUPPORTIVE";
+  return "CONTRA";
+}
+
+function deriveSignalStrength(score: number): SignalStrengthBucket {
+  if (score >= 5) return "STRONG";
+  if (score >= 3) return "NORMAL";
+  if (score >= 2) return "WEAK";
+  return "NONE";
+}
+
+function computeSignalScore(
+  side: "BUY" | "SELL",
+  ind: ExtendedIndicators,
+  htf: HigherTrend,
+): ScoreBreakdown {
+  // EMA trend matches direction → +2
+  const emaBull = ind.ema20 > ind.ema50;
+  const emaBear = ind.ema20 < ind.ema50;
+  const ema =
+    (side === "BUY"  && emaBull) ||
+    (side === "SELL" && emaBear) ? 2 : 0;
+
+  // HTF (15m) → +2 supportive, −2 contra, 0 neutral
+  let htfScore = 0;
+  if (htf === "BULLISH") htfScore = side === "BUY"  ? 2 : -2;
+  else if (htf === "BEARISH") htfScore = side === "SELL" ? 2 : -2;
+  // else neutral → 0
+
+  // Trend Memory matches → +1
+  const memBull = ind.momentumBias === "BULLISH";
+  const memBear = ind.momentumBias === "BEARISH";
+  const momentum =
+    (side === "BUY"  && memBull) ||
+    (side === "SELL" && memBear) ? 1 : 0;
+
+  // Pullback zone matches direction → +2 (else 0, no block)
+  const zoneMatch =
+    (side === "BUY"  && ind.zoneStatus === "BUY_ZONE") ||
+    (side === "SELL" && ind.zoneStatus === "SELL_ZONE");
+  const pullback = zoneMatch ? 2 : 0;
+
+  // Confirmation candle (rejection inside the zone) → +2 (else 0, no block)
+  const confirmation = (zoneMatch && ind.pullbackConfirmation === "REJECTION_DETECTED") ? 2 : 0;
+
+  // Strong breakout + volume spike → +2 (allows trade WITHOUT pullback zone)
+  const breakoutMatch =
+    (side === "BUY"  && ind.strongBreakoutBuy) ||
+    (side === "SELL" && ind.strongBreakoutSell);
+  const breakout = breakoutMatch ? 2 : 0;
+
+  // Trap against direction → −2 (e.g. FAKE_BREAKOUT_SELL while scoring BUY)
+  let trap = 0;
+  if (ind.trap) {
+    const trapAgainstBuy  = side === "BUY"  && (ind.trap === "FAKE_BREAKOUT_SELL" || ind.trap === "STOP_HUNT_SELL");
+    const trapAgainstSell = side === "SELL" && (ind.trap === "FAKE_BREAKDOWN_BUY" || ind.trap === "STOP_HUNT_BUY");
+    if (trapAgainstBuy || trapAgainstSell) trap = -2;
+  }
+
+  // High volatility spike → −1 (ATR / price > 0.5 %)
+  const atrPct = ind.atr / Math.max(ind.ema20, 1);
+  const volatility = atrPct > 0.005 ? -1 : 0;
+
+  const total = ema + htfScore + momentum + pullback + confirmation + breakout + trap + volatility;
+  return { ema, htf: htfScore, momentum, pullback, confirmation, breakout, trap, volatility, total };
+}
+
+function pickDirectionByScore(
+  ind: ExtendedIndicators,
+  htf: HigherTrend,
+): { side: "BUY" | "SELL"; score: ScoreBreakdown } | null {
+  const buy  = computeSignalScore("BUY",  ind, htf);
+  const sell = computeSignalScore("SELL", ind, htf);
+  if (buy.total < 2 && sell.total < 2) return null;
+  if (buy.total >  sell.total) return { side: "BUY",  score: buy };
+  if (sell.total > buy.total)  return { side: "SELL", score: sell };
+  // Tie — break by EMA bias
+  return ind.ema20 >= ind.ema50
+    ? { side: "BUY",  score: buy  }
+    : { side: "SELL", score: sell };
+}
+
+function buildScoreLabel(
+  side: "BUY" | "SELL",
+  strength: SignalStrengthBucket,
+  score: ScoreBreakdown,
+  mtfAlign: "SUPPORTIVE" | "NEUTRAL" | "CONTRA",
+): string {
+  // Source label — what part of the score earned the signal:
+  //   pullback+confirmation → PULLBACK · CONFIRMED
+  //   pullback only         → PULLBACK
+  //   breakout              → BREAKOUT
+  //   else                  → TREND
+  const source =
+    score.confirmation > 0 ? "PULLBACK · CONFIRMED" :
+    score.pullback     > 0 ? "PULLBACK" :
+    score.breakout     > 0 ? "BREAKOUT" :
+                             "TREND";
+  return `${strength} ${side} · ${source} · HTF ${mtfAlign}`;
+}
+
+// ── Risk filters that should still apply (non-strictness related) ─────────────
+// Active trade open in this TF, cooldown timer, anti-stacking proximity.
+// These are about RISK MANAGEMENT (don't pyramid, don't fire same dir 2x in
+// 8pts), not "is this a clean setup".
+function applySoftRiskFilters(
+  result: Omit<SignalResult, "timestamp">,
+  tfKey: string,
+  currentPrice: number,
+): Omit<SignalResult, "timestamp"> {
+  if (result.signal !== "BUY" && result.signal !== "SELL") return result;
+
+  // Active trade in this TF — convert to HOLD with reason
+  const active = checkActiveTrade(tfKey, currentPrice);
+  if (active) {
+    return {
+      ...result,
+      signal: "HOLD",
+      blockReason: `Active ${active.signal} trade in flight`,
+      // keep score/strength so UI still shows context
+    };
+  }
+
+  // 3-min cooldown after the previous confirmed signal
+  const last = lastSignalMemory[tfKey];
+  if (last && Date.now() - last.timestamp < COOLDOWN_MS) {
+    return {
+      ...result,
+      signal: "HOLD",
+      blockReason: "Cooldown — wait 3 min after last signal",
+    };
+  }
+
+  // Anti-stacking — same direction within 8pts of last signal
+  if (last && last.signal === result.signal &&
+      Math.abs(currentPrice - last.price) < PRICE_DENSITY_RANGE_PTS) {
+    return {
+      ...result,
+      signal: "HOLD",
+      blockReason: `Same-direction signal too close to last (${PRICE_DENSITY_RANGE_PTS}pt window)`,
+    };
+  }
+
+  return result;
+}
+
+// ── Confirmation persistence (PENDING → CONFIRMED) ────────────────────────────
+// Doesn't BLOCK — just marks the signalStatus so the UI / Telegram alerts
+// can decide whether to act. Per spec, we no longer force HOLD on PENDING.
+function trackConfirmationPersistence(
+  side: "BUY" | "SELL",
+  tfKey: string,
+  lastCandleTs: number,
+): "PENDING" | "CONFIRMED" {
+  const pending = pendingSignal[tfKey];
+  if (!pending || pending.signal !== side) {
+    pendingSignal[tfKey] = {
+      signal: side,
+      firstCandleTs: lastCandleTs,
+      lastCandleTs,
+      candleCount: 1,
+    };
+    return "PENDING";
+  }
+  // Same direction — increment count if a NEW candle has formed
+  if (lastCandleTs !== pending.lastCandleTs) {
+    pending.lastCandleTs = lastCandleTs;
+    pending.candleCount += 1;
+  }
+  return pending.candleCount >= CONFIRMATION_CANDLES ? "CONFIRMED" : "PENDING";
+}
+
+// ── New main pipeline — replaces generateSignal + applyMtfConfirmation +
+//    applyFilters. Returns Omit<SignalResult, "timestamp">. Trap detections
+//    are still respected (high-quality reversal entries) but they go through
+//    the score engine too, just with a forced direction.
+function runScoreEngine(
+  ind: ExtendedIndicators,
+  currentPrice: number,
+  timeframe: string,
+  tfKey: string,
+  lastCandleTs: number,
+  htf: HigherTrend,
+): Omit<SignalResult, "timestamp"> {
+  const marketMode: "TRENDING" | "SIDEWAYS" =
+    ind.trendDirection === "SIDEWAYS" ? "SIDEWAYS" : "TRENDING";
+  const trend: "BULLISH" | "BEARISH" | "NEUTRAL" =
+    ind.trendDirection === "BULLISH" ? "BULLISH" :
+    ind.trendDirection === "BEARISH" ? "BEARISH" : "NEUTRAL";
+
+  // Trap override — if a trap fires, it's a high-quality reversal entry.
+  // Use the trap direction directly; still compute score so the UI sees it.
+  let forcedSide: "BUY" | "SELL" | null = null;
+  if (ind.trap === "FAKE_BREAKOUT_SELL" || ind.trap === "STOP_HUNT_SELL") forcedSide = "SELL";
+  if (ind.trap === "FAKE_BREAKDOWN_BUY" || ind.trap === "STOP_HUNT_BUY")  forcedSide = "BUY";
+
+  let pick: { side: "BUY" | "SELL"; score: ScoreBreakdown } | null;
+  if (forcedSide) {
+    pick = { side: forcedSide, score: computeSignalScore(forcedSide, ind, htf) };
+    // Trap reversals deserve a confidence floor even if score is low,
+    // because the pattern itself is the high-quality edge.
+    if (pick.score.total < 3) pick.score = { ...pick.score, total: 3 };
+  } else {
+    pick = pickDirectionByScore(ind, htf);
+  }
+
+  const mtfAlign = pick ? classifyMtfAlignment(pick.side, htf) : "NEUTRAL";
+
+  if (!pick) {
+    // Score < 2 for both sides → HOLD with informational context
+    const hold = makeHold(currentPrice, ind.atr, trend, marketMode, timeframe, ind, 25);
+    return {
+      ...hold,
+      signalStrength: "NONE",
+      score: 0,
+      higherTrend: htf,
+      mtfStatus: mtfAlign,
+      zoneStatus: ind.zoneStatus,
+      pullbackConfirmation: ind.pullbackConfirmation,
+      pullbackState: ind.pullbackState,
+      momentumBias: ind.momentumBias,
+      momentumScore: ind.momentumScore,
+      marketState: ind.marketState,
+    };
+  }
+
+  const { side, score } = pick;
+  const strength = deriveSignalStrength(score.total);
+  // confidence = (score / 10) × 100, clamped 5..95
+  const confidence = Math.max(5, Math.min(95, Math.round((score.total / 10) * 100)));
+  const label = buildScoreLabel(side, strength, score, mtfAlign);
+
+  const base = side === "BUY"
+    ? makeBuy(currentPrice, ind.atr, confidence, marketMode, timeframe, ind, label)
+    : makeSell(currentPrice, ind.atr, confidence, marketMode, timeframe, ind, label);
+
+  // Confirmation persistence — informational, not a gate.
+  const sigStatus = trackConfirmationPersistence(side, tfKey, lastCandleTs);
+  // entryQuality reflects confidence band (kept for UI compat).
+  const entryQuality: "EARLY" | "CONFIRMED" = confidence >= 65 ? "CONFIRMED" : "EARLY";
+  const signalType: "TREND" | "REVERSAL" = forcedSide ? "REVERSAL" : "TREND";
+
+  const enriched: Omit<SignalResult, "timestamp"> = {
+    ...base,
+    signalStatus: sigStatus,
+    signalType,
+    entryQuality,
+    higherTrend: htf,
+    mtfStatus: mtfAlign,
+    signalStrength: strength,
+    score: score.total,
+    scoreBreakdown: {
+      ema: score.ema, htf: score.htf, momentum: score.momentum,
+      pullback: score.pullback, confirmation: score.confirmation,
+      breakout: score.breakout, trap: score.trap, volatility: score.volatility,
+    },
+    zoneStatus: ind.zoneStatus,
+    pullbackConfirmation: ind.pullbackConfirmation,
+    pullbackState: ind.pullbackState,
+    momentumBias: ind.momentumBias,
+    momentumScore: ind.momentumScore,
+    marketState: ind.marketState,
+  };
+
+  // Apply only soft risk filters (active trade / cooldown / anti-stacking).
+  // These can downgrade to HOLD with a blockReason.
+  return applySoftRiskFilters(enriched, tfKey, currentPrice);
+}
+
 export async function getSignal(timeframe: string): Promise<SignalResult> {
   const is1m   = timeframe === "1m";
   const cache  = is1m ? cachedSignal1m : cachedSignal5m;
@@ -1906,6 +2274,11 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       pullbackState: "NONE",
       momentumBias: "NEUTRAL",
       momentumScore: 0,
+      volumeAvg: 0,
+      volumeLast: 0,
+      volumeSpike: false,
+      strongBreakoutBuy: false,
+      strongBreakoutSell: false,
     };
   }
 
@@ -1922,9 +2295,14 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     ohlc?.timestamps?.[ohlc.timestamps.length - 1] ??
     Math.floor(Date.now() / (is1m ? 60_000 : 300_000));
 
-  const rawResult      = generateSignal(indicators, currentPrice, timeframe);
-  const mtfAdjusted    = applyMtfConfirmation(rawResult, higherTrend, timeframe, indicators);
-  const filteredResult = applyFilters(mtfAdjusted, tfKey, currentPrice, lastCandleTs, indicators);
+  // ── Score-Based Engine (replaces generateSignal → applyMtfConfirmation →
+  //    applyFilters). No more hard blocks on MTF / pullback / confirmation —
+  //    those are score contributors, not gates. The result still carries
+  //    blockReason when SOFT risk filters (active trade, cooldown, anti-stack)
+  //    fire, since those are about risk management, not setup quality.
+  const filteredResult = runScoreEngine(
+    indicators, currentPrice, timeframe, tfKey, lastCandleTs, higherTrend,
+  );
 
   // ── Indicator Conflict + Chop + Regime + Permission (NEW) ────────────────
   // Runs AFTER applyFilters so it sees the final signal/confidence, then
@@ -1944,13 +2322,14 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     chopScore, conflict.level,
   );
 
-  // Promote to first-class CONFLICT state when truly mixed/choppy. Keeps the
-  // direction context on bias so UI can still describe the trend.
+  // Per the score-engine refactor we no longer demote to CONFLICT on chop /
+  // mixed indicators — those are handled as score deductions and permission
+  // downgrades. Only escalate to CONFLICT on truly SEVERE indicator splits
+  // AND a directional signal that the score engine still wants to fire.
   let decisionSignal = filteredResult.signal;
-  if (conflict.level === "SEVERE" || marketRegime === "CHOPPY") {
-    if (decisionSignal !== "HOLD" && decisionSignal !== "SETUP") {
-      decisionSignal = "CONFLICT";
-    }
+  if (conflict.level === "SEVERE" && (filteredResult.score ?? 0) < 3 &&
+      decisionSignal !== "HOLD" && decisionSignal !== "SETUP") {
+    decisionSignal = "CONFLICT";
   }
 
   const permission = derivePermission(
@@ -1966,10 +2345,11 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
   const bannerMessage = buildBannerMessage(permission, conflict.level, marketRegime, higherTrend);
   const softenedLabel = softenSignalLabel(filteredResult.signalLabel, decisionSignal, permission, indicatorBias);
 
-  // ── Strip trade levels when not tradable (per spec) ──────────────────────
-  // BLOCKED / WATCHLIST → no actionable Entry / SL / TP shown; zone status
-  // also clears so the UI doesn't display "BUY ZONE" beside a non-tradable.
-  const stripped = permission === "BLOCKED" || permission === "WATCHLIST";
+  // ── Strip trade levels only when permission is BLOCKED ──────────────────
+  // Per the score-engine refactor: WATCHLIST setups still expose entry / SL
+  // / TP so the user can see what the trade WOULD look like. Only BLOCKED
+  // (true HOLD / CONFLICT) hides levels.
+  const stripped = permission === "BLOCKED";
   const safeEntry      = stripped ? 0 : filteredResult.entry;
   const safeSL         = stripped ? 0 : filteredResult.stopLoss;
   const safeTP         = stripped ? 0 : filteredResult.takeProfit;

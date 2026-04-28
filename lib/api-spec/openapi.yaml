@@ -338,8 +338,27 @@ components:
           description: 15m higher-timeframe trend direction used for MTF confirmation.
         mtfStatus:
           type: string
-          enum: [WAITING, ALIGNED, BLOCKED, SETUP_FORMING]
-          description: WAITING = HOLD/no entry; ALIGNED = entry matches 15m trend; BLOCKED = entry vs 15m trend conflict; SETUP_FORMING = higher TF trending while entry TF is in a matching pullback.
+          enum: [WAITING, ALIGNED, BLOCKED, SETUP_FORMING, SUPPORTIVE, NEUTRAL, CONTRA]
+          description: SUPPORTIVE = 15m trend agrees with entry direction; NEUTRAL = 15m flat; CONTRA = 15m disagrees (trade is allowed but score takes a -2 hit). Legacy WAITING/ALIGNED/BLOCKED/SETUP_FORMING are kept for backwards-compat but the score engine emits SUPPORTIVE/NEUTRAL/CONTRA.
+        signalStrength:
+          type: string
+          enum: [STRONG, NORMAL, WEAK, NONE]
+          description: Score-engine strength bucket. >=5 STRONG, >=3 NORMAL, >=2 WEAK, <2 NONE (HOLD).
+        score:
+          type: number
+          description: Weighted setup score, typically -3..+10. Confidence = (score / 10) * 100.
+        scoreBreakdown:
+          type: object
+          description: Per-axis score contributions (EMA, HTF, momentum, pullback, confirmation, breakout, trap, volatility).
+          properties:
+            ema:           { type: number }
+            htf:           { type: number }
+            momentum:      { type: number }
+            pullback:      { type: number }
+            confirmation:  { type: number }
+            breakout:      { type: number }
+            trap:          { type: number }
+            volatility:    { type: number }
         entryQuality:
           type: string
           enum: [EARLY, CONFIRMED]

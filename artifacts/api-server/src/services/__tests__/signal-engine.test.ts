@@ -51,7 +51,11 @@ function ind(p: {
   };
 }
 
-// ── Scenario 1: Mixed indicators + neutral HTF → WATCHLIST ────────────────────
+// ── Scenario 1: Mixed indicators + neutral HTF → QUALIFIED (banner stays) ─────
+// Score-engine refactor: indicator conflict no longer demotes to WATCHLIST on
+// its own. With 70-confidence the permission lands on QUALIFIED, but the
+// "Mixed indicators…" banner is still emitted so the user knows the setup
+// isn't clean. softenSignalLabel still rewrites the strong free-text label.
 {
   const bias = computeIndicatorBias(
     ind({ ema20: 100, ema50: 99, macdLine: -0.2, macdSignal: 0.1, macdHistogram: -0.3, rsi: 50, momentum: 0 }),
@@ -66,10 +70,12 @@ function ind(p: {
   let ok = true;
   ok = eq(conflict.level, "MIXED",     "scenario-1.conflictLevel") && ok;
   ok = eq(regime,         "TRANSITION","scenario-1.regime")        && ok;
-  ok = eq(perm,           "WATCHLIST", "scenario-1.permission")    && ok;
+  ok = eq(perm,           "QUALIFIED", "scenario-1.permission")    && ok;
   ok = eq(banner,         "Mixed indicators — waiting for structure confirmation", "scenario-1.banner") && ok;
-  ok = (softened !== "Strong bullish breakout") && ok;
-  record("S1: mixed + neutral HTF → WATCHLIST", ok, `bias=${JSON.stringify(bias)}`);
+  // QUALIFIED keeps the engine label as-is (no soften), so we just check the
+  // helper returned the original string instead of forcing a rewrite.
+  ok = eq(softened, "Strong bullish breakout", "scenario-1.softenedLabel") && ok;
+  record("S1: mixed + neutral HTF → QUALIFIED (banner stays)", ok, `bias=${JSON.stringify(bias)}`);
 }
 
 // ── Scenario 2: Full bearish alignment → SELL · ACTIONABLE ────────────────────
@@ -87,15 +93,18 @@ function ind(p: {
   );
   const conflict = detectIndicatorConflict(bias);
   const regime   = classifyMarketRegime("BEARISH", "STRONG", 0.15, conflict.level);
+  // Score-engine refactor: ACTIONABLE threshold dropped to confidence ≥ 60.
+  // Both 82 and 70 are now ACTIONABLE under clean bearish alignment. Test the
+  // boundary at 55 (still QUALIFIED) to keep the gate exercised.
   const permA    = derivePermission("SELL", "CONFIRMED", 82, conflict.level, "BEARISH", regime, "ALIGNED");
-  const permQ    = derivePermission("SELL", "CONFIRMED", 70, conflict.level, "BEARISH", regime, "ALIGNED");
+  const permQ    = derivePermission("SELL", "CONFIRMED", 55, conflict.level, "BEARISH", regime, "ALIGNED");
   const banner   = buildBannerMessage(permA, conflict.level, regime, "BEARISH");
 
   let ok = true;
   ok = eq(conflict.level, "NONE",          "scenario-2.conflictLevel") && ok;
   ok = eq(regime,         "TRENDING_BEAR", "scenario-2.regime")        && ok;
   ok = eq(permA,          "ACTIONABLE",    "scenario-2.permission@82") && ok;
-  ok = eq(permQ,          "QUALIFIED",     "scenario-2.permission@70") && ok;
+  ok = eq(permQ,          "QUALIFIED",     "scenario-2.permission@55") && ok;
   ok = eq(banner,         undefined,       "scenario-2.banner")        && ok;
   record("S2: full bearish → SELL · ACTIONABLE", ok);
 }
@@ -115,18 +124,24 @@ function ind(p: {
   );
   const conflict = detectIndicatorConflict(bias);
   const regime   = classifyMarketRegime("BULLISH", "STRONG", 0.2, conflict.level);
+  // Score-engine refactor: 72 confidence is well above the new ACTIONABLE
+  // threshold (60), so this clean bullish setup graduates to ACTIONABLE.
   const perm     = derivePermission("BUY", "CONFIRMED", 72, conflict.level, "BULLISH", regime, "ALIGNED");
   const banner   = buildBannerMessage(perm, conflict.level, regime, "BULLISH");
 
   let ok = true;
   ok = eq(conflict.level, "NONE",          "scenario-3.conflictLevel") && ok;
   ok = eq(regime,         "TRENDING_BULL", "scenario-3.regime")        && ok;
-  ok = eq(perm,           "QUALIFIED",     "scenario-3.permission")    && ok;
+  ok = eq(perm,           "ACTIONABLE",    "scenario-3.permission")    && ok;
   ok = eq(banner,         undefined,       "scenario-3.banner")        && ok;
-  record("S3: bullish reversal + structure → BUY · QUALIFIED", ok);
+  record("S3: bullish reversal + structure → BUY · ACTIONABLE", ok);
 }
 
-// ── Scenario 4: Choppy market → permission BLOCKED ────────────────────────────
+// ── Scenario 4: Choppy market → WATCHLIST (banner stays) ─────────────────────
+// Score-engine refactor: chop alone no longer hard-blocks. The market is
+// still flagged CHOPPY and the "no scalp setups" banner still fires, but
+// permission softens to WATCHLIST so users can still see the candidate
+// levels — the score itself will tell them how weak the setup is.
 {
   // Heavily oscillating candle directions — every other candle flips,
   // EMA20 / EMA50 cross multiple times.
@@ -150,9 +165,9 @@ function ind(p: {
   let ok = true;
   ok = (chop > 0.5)                && eq(true, chop > 0.5,  "scenario-4.chopScore>0.5") && ok;
   ok = eq(regime, "CHOPPY",         "scenario-4.regime")     && ok;
-  ok = eq(perm,   "BLOCKED",        "scenario-4.permission") && ok;
+  ok = eq(perm,   "WATCHLIST",      "scenario-4.permission") && ok;
   ok = eq(banner, "Choppy market — no scalp setups", "scenario-4.banner") && ok;
-  record("S4: choppy → BLOCKED", ok, `chopScore=${chop}`);
+  record("S4: choppy → WATCHLIST (banner stays)", ok, `chopScore=${chop}`);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────────

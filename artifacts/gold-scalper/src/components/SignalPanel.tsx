@@ -187,7 +187,12 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
             <div className="flex flex-col items-center justify-center p-6 rounded-2xl bg-secondary/50 border border-white/5">
               <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3">
                 {data.signal === "SETUP"            ? "Trade Forming"
-                  : data.signal === "HOLD"          ? "No Opportunity"
+                  : data.signal === "HOLD"          ? (
+                      data.signalStrength === "WEAK"   ? "Weak Setup"
+                    : data.signalStrength === "NORMAL" ? "Moderate Setup"
+                    : data.signalStrength === "STRONG" ? "Strong Setup"
+                    :                                    "No Opportunity"
+                    )
                   : data.signalStatus === "PENDING" ? "Awaiting Confirmation"
                   :                                   "Action Required"}
               </span>
@@ -204,8 +209,20 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                   Permission is the gate (ACTIONABLE/QUALIFIED show levels;
                   WATCHLIST/BLOCKED hide them). Regime is the "what kind of
                   market is this" tag. Both come from the new decision layer. */}
-              {(data.permission || data.marketRegime) && (
+              {(data.permission || data.marketRegime || data.signalStrength) && (
                 <div className="mt-2 flex items-center gap-1.5 flex-wrap justify-center">
+                  {data.signalStrength && data.signalStrength !== "NONE" && (
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-md text-[9.5px] font-black tracking-widest uppercase border",
+                      data.signalStrength === "STRONG" && "border-success/60 bg-success/15 text-success",
+                      data.signalStrength === "NORMAL" && "border-primary/60 bg-primary/15 text-primary",
+                      data.signalStrength === "WEAK"   && "border-warning/50 bg-warning/10 text-warning",
+                    )}>
+                      {data.signalStrength} {typeof data.score === "number" && (
+                        <span className="opacity-70 font-bold ml-0.5">({data.score})</span>
+                      )}
+                    </span>
+                  )}
                   {data.permission && (
                     <span className={cn(
                       "px-2 py-0.5 rounded-md text-[9.5px] font-black tracking-widest uppercase border",
@@ -403,10 +420,10 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                       <span className="text-muted-foreground">MTF Status</span>
                       <span className={cn(
                         "font-bold tracking-widest inline-flex items-center gap-1",
-                        data.mtfStatus === "ALIGNED"        && "text-success",
-                        data.mtfStatus === "BLOCKED"        && "text-destructive",
-                        data.mtfStatus === "WAITING"        && "text-muted-foreground",
-                        data.mtfStatus === "SETUP_FORMING"  && "text-primary",
+                        (data.mtfStatus === "ALIGNED" || data.mtfStatus === "SUPPORTIVE") && "text-success",
+                        (data.mtfStatus === "BLOCKED" || data.mtfStatus === "CONTRA")     && "text-destructive",
+                        (data.mtfStatus === "WAITING" || data.mtfStatus === "NEUTRAL")    && "text-muted-foreground",
+                        data.mtfStatus === "SETUP_FORMING"                                && "text-primary",
                       )}>
                         {data.mtfStatus === "SETUP_FORMING" && (
                           <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
