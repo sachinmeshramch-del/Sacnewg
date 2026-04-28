@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { getLivePrice, getSignal, getHistory } from "../services/goldService.js";
+import { getLivePrice, getSignal, getHistory, clearHistory } from "../services/goldService.js";
 import { getFinnhubPrice, isFinnhubConnected } from "../services/finnhubService.js";
 import { getSpotPrice } from "../services/spotGoldService.js";
 import { setTelegramConfig, getTelegramConfig, sendTelegramAlert } from "../services/telegramService.js";
@@ -45,6 +45,16 @@ router.get("/history", (_req, res) => {
   } catch (err) {
     console.error("History error:", err);
     res.status(500).json({ error: "Failed to fetch history" });
+  }
+});
+
+router.delete("/history", (_req, res) => {
+  try {
+    const result = clearHistory();
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error("Clear history error:", err);
+    res.status(500).json({ error: "Failed to clear history" });
   }
 });
 

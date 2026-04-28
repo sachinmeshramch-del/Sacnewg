@@ -2634,4 +2634,12 @@ export function getHistory(): { signals: HistoryItem[]; total: number } {
   return { signals, total: signals.length };
 }
 
+export function clearHistory(): { cleared: number } {
+  const count = signalHistory.length;
+  signalHistory = [];
+  historyIdCounter = 1;
+  saveHistory();
+  return { cleared: count };
+}
+
 export { getSessionName };

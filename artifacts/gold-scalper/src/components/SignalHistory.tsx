@@ -5,9 +5,24 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { format } from "date-fns";
-import { Clock, Flame, Zap, AlertTriangle, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Clock, Flame, Zap, AlertTriangle, TrendingUp, TrendingDown, Minus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useQueryClient } from "@tanstack/react-query";
+import { getGetHistoryQueryKey } from "@workspace/api-client-react";
+import { useToast } from "@/hooks/use-toast";
 
 type Strength = "STRONG" | "MODERATE" | "WEAK" | "IGNORE";
 
@@ -167,6 +182,31 @@ function SignalTable({
 export function SignalHistory() {
   const { data, isLoading } = useSignalHistory();
   const [strongOnly, setStrongOnly] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  async function handleClear() {
+    setClearing(true);
+    try {
+      const res = await fetch("/api/history", { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { cleared?: number };
+      await queryClient.invalidateQueries({ queryKey: getGetHistoryQueryKey() });
+      toast({
+        title: "History cleared",
+        description: `Removed ${json.cleared ?? 0} signals from all tables.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Failed to clear history",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setClearing(false);
+    }
+  }
 
   const allRows = useMemo<SignalRow[]>(() => {
     if (!data?.signals) return [];
@@ -218,20 +258,59 @@ export function SignalHistory() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Show Only Strong Signals toggle */}
-      <div className="flex items-center justify-end gap-3 px-1">
-        <Label
-          htmlFor="strong-only"
-          className="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer"
-        >
-          Show Only Strong Signals
-        </Label>
-        <Switch
-          id="strong-only"
-          checked={strongOnly}
-          onCheckedChange={setStrongOnly}
-          data-testid="switch-strong-only"
-        />
+      {/* Toolbar: Clear button + Strong-only toggle */}
+      <div className="flex items-center justify-end gap-4 px-1 flex-wrap">
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-2 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={clearing || (allRows.length === 0)}
+              data-testid="button-clear-history"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span className="text-xs uppercase tracking-wider">
+                {clearing ? "Clearing..." : "Clear History"}
+              </span>
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent data-testid="dialog-clear-history">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clear all signal history?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete every signal from the STRONG, MODERATE,
+                and WEAK tables. New signals will start populating again as the
+                market triggers them. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="button-cancel-clear">Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleClear}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                data-testid="button-confirm-clear"
+              >
+                Yes, clear all
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <div className="flex items-center gap-3">
+          <Label
+            htmlFor="strong-only"
+            className="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer"
+          >
+            Show Only Strong Signals
+          </Label>
+          <Switch
+            id="strong-only"
+            checked={strongOnly}
+            onCheckedChange={setStrongOnly}
+            data-testid="switch-strong-only"
+          />
+        </div>
       </div>
 
       {/* STRONG SIGNALS — High Priority */}
