@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-20", "web", "bash"]
 
 [[artifacts]]
 id = "artifacts/api-server"
@@ -38,9 +38,12 @@ task = "shell.exec"
 args = "(PORT=8080 pnpm --filter @workspace/api-server run dev) & (PORT=23682 BASE_PATH=/ pnpm --filter @workspace/gold-scalper run dev) & wait"
 
 [agent]
-stack = "PNPM_WORKSPACE"
+stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
 
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[nix]
+channel = "stable-25_05"
