@@ -9,6 +9,7 @@ import type { HistoryItemOutcome } from "./historyItemOutcome";
 import type { HistoryItemPermission } from "./historyItemPermission";
 import type { HistoryItemSignal } from "./historyItemSignal";
 import type { HistoryItemSignalStatus } from "./historyItemSignalStatus";
+import type { HistoryItemSignalType } from "./historyItemSignalType";
 
 export interface HistoryItem {
   id: number;
@@ -23,4 +24,6 @@ export interface HistoryItem {
   outcome?: HistoryItemOutcome;
   permission?: HistoryItemPermission;
   signalStatus?: HistoryItemSignalStatus;
+  /** Confidence-derived classification. STRONG ≥ 65, NORMAL ≥ 50, WEAK ≥ 40, IGNORE below. */
+  signalType?: HistoryItemSignalType;
 }

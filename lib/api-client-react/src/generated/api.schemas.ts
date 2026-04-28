@@ -446,6 +446,19 @@ export const HistoryItemSignalStatus = {
   PENDING: "PENDING",
 } as const;
 
+/**
+ * Confidence-derived classification. STRONG ≥ 65, NORMAL ≥ 50, WEAK ≥ 40, IGNORE below.
+ */
+export type HistoryItemSignalType =
+  (typeof HistoryItemSignalType)[keyof typeof HistoryItemSignalType];
+
+export const HistoryItemSignalType = {
+  STRONG: "STRONG",
+  NORMAL: "NORMAL",
+  WEAK: "WEAK",
+  IGNORE: "IGNORE",
+} as const;
+
 export interface HistoryItem {
   id: number;
   signal: HistoryItemSignal;
@@ -459,6 +472,8 @@ export interface HistoryItem {
   outcome?: HistoryItemOutcome;
   permission?: HistoryItemPermission;
   signalStatus?: HistoryItemSignalStatus;
+  /** Confidence-derived classification. STRONG ≥ 65, NORMAL ≥ 50, WEAK ≥ 40, IGNORE below. */
+  signalType?: HistoryItemSignalType;
 }
 
 export interface HistoryResponse {

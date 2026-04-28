@@ -129,6 +129,19 @@ export interface HistoryItem {
   outcome: "WIN" | "LOSS" | "PENDING" | null;
   permission?: "ACTIONABLE" | "QUALIFIED" | "WATCHLIST" | "BLOCKED";
   signalStatus?: "CONFIRMED" | "PENDING";
+  // Confidence-derived classification used by the UI to split tradable signals
+  // from weak ones. STRONG ≥ 65, NORMAL ≥ 50, WEAK ≥ 40, IGNORE below.
+  signalType?: "STRONG" | "NORMAL" | "WEAK" | "IGNORE";
+}
+
+/** Classify a signal by its confidence score. */
+export function classifySignalByConfidence(
+  confidence: number,
+): "STRONG" | "NORMAL" | "WEAK" | "IGNORE" {
+  if (confidence >= 65) return "STRONG";
+  if (confidence >= 50) return "NORMAL";
+  if (confidence >= 40) return "WEAK";
+  return "IGNORE";
 }
 
 // ── History Persistence ────────────────────────────────────────────────────────
@@ -2541,6 +2554,7 @@ function addToHistory(signal: SignalResult) {
     outcome: "PENDING",
     permission: signal.permission,
     signalStatus: signal.signalStatus,
+    signalType: classifySignalByConfidence(signal.confidence),
   };
   signalHistory.unshift(item);
   if (signalHistory.length > 50) signalHistory = signalHistory.slice(0, 50);
@@ -2571,7 +2585,11 @@ async function resolveOutcome(id: number, entry: number, sl: number, tp: number,
 }
 
 export function getHistory(): { signals: HistoryItem[]; total: number } {
-  return { signals: signalHistory, total: signalHistory.length };
+  // Backfill signalType for older entries persisted before classification existed.
+  const signals = signalHistory.map(s =>
+    s.signalType ? s : { ...s, signalType: classifySignalByConfidence(s.confidence) }
+  );
+  return { signals, total: signals.length };
 }
 
 export { getSessionName };

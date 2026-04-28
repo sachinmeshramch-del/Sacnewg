@@ -20,6 +20,7 @@ export * from "./historyItemOutcome";
 export * from "./historyItemPermission";
 export * from "./historyItemSignal";
 export * from "./historyItemSignalStatus";
+export * from "./historyItemSignalType";
 export * from "./historyResponse";
 export * from "./intradayHistoryItem";
 export * from "./intradayHistoryItemOutcome";
