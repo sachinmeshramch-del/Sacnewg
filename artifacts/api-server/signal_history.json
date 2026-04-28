@@ -1,6 +1,20 @@
 {
   "items": [
     {
+      "id": 55,
+      "signal": "SELL",
+      "confidence": 30,
+      "entry": 4597.1,
+      "stopLoss": 4599.77,
+      "takeProfit": 4591.22,
+      "trend": "BEARISH",
+      "timeframe": "5m",
+      "timestamp": "2026-04-28T19:25:28.290Z",
+      "outcome": "PENDING",
+      "permission": "WATCHLIST",
+      "signalStatus": "PENDING"
+    },
+    {
       "id": 54,
       "signal": "SELL",
       "confidence": 30,
@@ -589,19 +603,7 @@
       "timeframe": "5m",
       "timestamp": "2026-04-22T14:07:13.644Z",
       "outcome": "PENDING"
-    },
-    {
-      "id": 5,
-      "signal": "SELL",
-      "confidence": 60,
-      "entry": 4772.3,
-      "stopLoss": 4791.39,
-      "takeProfit": 4743.67,
-      "trend": "BEARISH",
-      "timeframe": "5m",
-      "timestamp": "2026-04-22T14:02:20.067Z",
-      "outcome": "PENDING"
     }
   ],
-  "counter": 55
+  "counter": 56
 }
