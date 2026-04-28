@@ -141,8 +141,10 @@ export function classifySignalByConfidence(
 ): "STRONG" | "MODERATE" | "WEAK" | "IGNORE" {
   if (confidence >= 65) return "STRONG";
   if (confidence >= 50) return "MODERATE";
-  if (confidence >= 35) return "WEAK";
-  return "IGNORE";
+  // Everything from 0–49 is now classified as WEAK (per spec).
+  // IGNORE is retained in the type for backwards compatibility but is no
+  // longer produced by classification.
+  return "WEAK";
 }
 
 // ── History Persistence ────────────────────────────────────────────────────────
@@ -2528,9 +2530,6 @@ function addToHistory(signal: SignalResult) {
   if (signal.signal !== "BUY" && signal.signal !== "SELL") return;
 
   const strength = classifySignalByConfidence(signal.confidence);
-
-  // Drop sub-threshold noise (confidence < 35).
-  if (strength === "IGNORE") return;
 
   // Storage filter for non-STRONG signals only — STRONG signals are *always*
   // stored regardless of MTF / market mode (they cannot be suppressed by

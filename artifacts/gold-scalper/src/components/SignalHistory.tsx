@@ -44,8 +44,8 @@ const MAX_PER_TABLE = 20;
 function classify(confidence: number): Strength {
   if (confidence >= 65) return "STRONG";
   if (confidence >= 50) return "MODERATE";
-  if (confidence >= 35) return "WEAK";
-  return "IGNORE";
+  // Everything from 0–49 is now WEAK.
+  return "WEAK";
 }
 
 function getConfidenceColor(c: number) {
