@@ -2575,7 +2575,31 @@ function addToHistory(signal: SignalResult) {
     signalType: strength,
   };
   signalHistory.unshift(item);
-  if (signalHistory.length > 50) signalHistory = signalHistory.slice(0, 50);
+
+  // Per-bucket cap: keep only the latest MAX_PER_BUCKET signals in each
+  // strength tier (STRONG / MODERATE / WEAK). Older entries beyond the cap
+  // are dropped automatically so the history never grows unbounded.
+  const MAX_PER_BUCKET = 20;
+  const buckets: Record<string, HistoryItem[]> = { STRONG: [], MODERATE: [], WEAK: [] };
+  const others: HistoryItem[] = [];
+  for (const h of signalHistory) {
+    const tier = h.signalType ?? classifySignalByConfidence(h.confidence);
+    if (tier === "STRONG" || tier === "MODERATE" || tier === "WEAK") {
+      buckets[tier].push(h);
+    } else {
+      others.push(h);
+    }
+  }
+  for (const k of Object.keys(buckets)) {
+    if (buckets[k].length > MAX_PER_BUCKET) {
+      buckets[k] = buckets[k]
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, MAX_PER_BUCKET);
+    }
+  }
+  signalHistory = [...buckets.STRONG, ...buckets.MODERATE, ...buckets.WEAK, ...others]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
   saveHistory();
   // Only schedule outcome resolution for tradable signals — PENDING/WATCHLIST
   // entries don't represent an active trade so their outcome stays "PENDING".
