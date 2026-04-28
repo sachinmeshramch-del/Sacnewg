@@ -201,12 +201,6 @@ export function SignalHistory() {
   const moderateRows = useMemo(() => bucket("MODERATE"), [allRows]);
   const weakRows = useMemo(() => bucket("WEAK"), [allRows]);
 
-  // Auto-priority: latest STRONG directional signal.
-  const latestStrong = useMemo(
-    () => strongRows.find(r => r.signal === "BUY" || r.signal === "SELL"),
-    [strongRows],
-  );
-
   if (isLoading) {
     return (
       <Card className="border-white/10 bg-card/80 backdrop-blur-xl">
@@ -221,106 +215,6 @@ export function SignalHistory() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Auto Priority Display — latest STRONG signal */}
-      {latestStrong && (
-        <Card
-          className={cn(
-            "border-2 backdrop-blur-xl overflow-hidden relative",
-            latestStrong.signal === "BUY"
-              ? "border-success/50 bg-success/[0.04] shadow-[0_0_40px_rgba(22,163,74,0.18)]"
-              : "border-destructive/50 bg-destructive/[0.04] shadow-[0_0_40px_rgba(225,29,72,0.18)]",
-          )}
-          data-testid="card-priority-signal"
-        >
-          <div
-            className={cn(
-              "absolute top-0 right-0 w-72 h-72 blur-[120px] pointer-events-none rounded-full",
-              latestStrong.signal === "BUY" ? "bg-success/15" : "bg-destructive/15",
-            )}
-          />
-          <CardContent className="p-5 relative">
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex items-center gap-3">
-                <Flame
-                  className={cn(
-                    "h-7 w-7",
-                    latestStrong.signal === "BUY" ? "text-success" : "text-destructive",
-                  )}
-                />
-                <div className="flex flex-col">
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                    Priority Signal
-                  </span>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span
-                      className={cn(
-                        "text-2xl font-black tracking-widest",
-                        latestStrong.signal === "BUY" ? "text-success" : "text-destructive",
-                      )}
-                    >
-                      STRONG {latestStrong.signal}
-                    </span>
-                    {latestStrong.signal === "BUY" ? (
-                      <TrendingUp className="h-5 w-5 text-success" />
-                    ) : (
-                      <TrendingDown className="h-5 w-5 text-destructive" />
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 ml-auto flex-wrap">
-                <div className="flex flex-col items-end">
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Confidence
-                  </span>
-                  <span
-                    className={cn(
-                      "text-2xl font-black font-numbers tabular-nums",
-                      getConfidenceColor(latestStrong.confidence),
-                    )}
-                  >
-                    {latestStrong.confidence.toFixed(0)}%
-                  </span>
-                </div>
-                <div className="h-10 w-px bg-white/10 mx-2" />
-                <div className="grid grid-cols-3 gap-3 text-right">
-                  <div>
-                    <div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-                      Entry
-                    </div>
-                    <div className="font-numbers text-sm font-bold">
-                      ${latestStrong.entry.toFixed(2)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-                      SL
-                    </div>
-                    <div className="font-numbers text-sm font-bold text-destructive/90">
-                      ${latestStrong.stopLoss.toFixed(2)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-                      TP
-                    </div>
-                    <div className="font-numbers text-sm font-bold text-success/90">
-                      ${latestStrong.takeProfit.toFixed(2)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="mt-3 flex items-center gap-3 text-[10px] text-muted-foreground tracking-wide">
-              <span>{latestStrong.timeframe.toUpperCase()}</span>
-              <span>•</span>
-              <span>{format(new Date(latestStrong.timestamp), "MMM dd, HH:mm")}</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Show Only Strong Signals toggle */}
       <div className="flex items-center justify-end gap-3 px-1">
         <Label
