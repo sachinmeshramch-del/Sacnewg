@@ -7,7 +7,13 @@
  */
 
 /**
- * Per-axis score contributions (EMA, HTF, momentum, pullback, confirmation, breakout, trap, volatility).
+ * Per-axis score contributions. Base axes: ema/htf/momentum/pullback/
+confirmation/breakout/trap/volatility. Volume axes (boosters only —
+never block a trade): `volume` (+0/+1/+2 from current vs 20-bar SMA),
+`breakoutVolume` (+2 valid / -1 weak / 0), `pullbackVolume` (+2 bonus
+when zone+rejection prints with above-avg volume), `stopHunt` (+2
+long opposite-side wick + above-avg volume = liquidity grab).
+
  */
 export type ScalperSignalResponseScoreBreakdown = {
   ema?: number;
@@ -18,4 +24,9 @@ export type ScalperSignalResponseScoreBreakdown = {
   breakout?: number;
   trap?: number;
   volatility?: number;
+  volume?: number;
+  breakoutVolume?: number;
+  pullbackVolume?: number;
+  stopHunt?: number;
+  total?: number;
 };

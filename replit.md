@@ -135,7 +135,13 @@ UI gating (`SignalPanel.tsx`): renders the Permission + Market Regime + (optiona
 | Rejection/confirmation candle | +2 | wick ≥ 1.5× body, persisted via `trackConfirmationPersistence` |
 | Strong breakout | +2 | break of last-20 high/low (fallback when no pullback) |
 | Fake breakout / trap override | -2 (and forces side flip) | trap detector |
-| Volatility spike | -1 | volume > 1.5× 20-bar average |
+| Volatility spike | -1 | ATR / price > 0.5 % |
+| **Volume** (standalone) | +0 / +1 / +2 | currentVol vs `SMA(volume, 20)` — > 1.5× → +2, > 1× → +1 |
+| **Breakout volume** | +2 / -1 / 0 | breakout WITH vol > avg → +2 valid; breakout w/o vol → -1 weak/possible fake |
+| **Pullback volume** | +2 / 0 | zone + reversal candle WITH vol > avg → +2 strong entry bonus |
+| **Stop hunt** | +2 / 0 | long opposite-side wick (lower for BUY / upper for SELL) ≥ 1.5× body + vol > avg = liquidity grab |
+
+**Volume rule** (per spec — never blocks): all four volume axes are pure boosters. When the feed reports zero / missing volume (Yahoo intraday futures sometimes do), `hasVolume = false` and every volume axis collapses to 0 so a missing feed never penalises an otherwise-clean setup. Volume context is also surfaced in the label as a `· VOL+` / `· VOL` / `· STOP-HUNT` / `· WEAK BREAKOUT` suffix.
 
 Strength buckets: **STRONG ≥ 5**, **NORMAL ≥ 3**, **WEAK ≥ 2**, anything below = HOLD. `confidence = clamp(round((score / 10) * 100), 5, 95)`. Direction is picked from the signed score per axis. Trap override forces the opposite side and floors score ≥ 3. Soft risk filters (`applySoftRiskFilters`) still enforce active-trade slot, cooldown, and anti-stack — these are the only remaining hard blocks. Output adds `signalStrength`, `score`, and `scoreBreakdown` (per-axis numbers) on top of the existing `SignalResult`. UI labels surface as `STRONG BUY · PULLBACK · HTF SUPPORTIVE` / `WEAK SELL · BREAKOUT · HTF CONTRA` etc.
 

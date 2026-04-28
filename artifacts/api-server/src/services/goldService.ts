@@ -84,6 +84,12 @@ interface SignalResult {
     breakout: number;
     trap: number;
     volatility: number;
+    // Volume confirmation axes (boosters only — never block a trade).
+    volume: number;          // +0/+1/+2 from current vs 20-bar SMA
+    breakoutVolume: number;  // +2 valid / -1 weak / 0
+    pullbackVolume: number;  // +2 bonus when zone+rejection prints w/ volume
+    stopHunt: number;        // +2 long opposite-side wick + above-avg volume
+    total: number;
   };
   entryQuality?: "EARLY" | "CONFIRMED";
   marketState?: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH";
@@ -1928,6 +1934,15 @@ interface ScoreBreakdown {
   breakout: number;
   trap: number;
   volatility: number;
+  // ── Volume confirmation axes (per spec — volume NEVER blocks a trade) ───
+  // volume        : +0/+1/+2 standalone volume score (relative to 20-bar SMA)
+  // breakoutVolume: +2 / -1 / 0 — validates breakout vs avg volume
+  // pullbackVolume: +2 / 0     — bonus when pullback+rejection prints w/ volume
+  // stopHunt      : +2 / 0     — long opposite-side wick + volume = liquidity grab
+  volume: number;
+  breakoutVolume: number;
+  pullbackVolume: number;
+  stopHunt: number;
   total: number;
 }
 
@@ -1980,7 +1995,8 @@ function computeSignalScore(
   const pullback = zoneMatch ? 2 : 0;
 
   // Confirmation candle (rejection inside the zone) → +2 (else 0, no block)
-  const confirmation = (zoneMatch && ind.pullbackConfirmation === "REJECTION_DETECTED") ? 2 : 0;
+  const reversalCandle = ind.pullbackConfirmation === "REJECTION_DETECTED";
+  const confirmation = (zoneMatch && reversalCandle) ? 2 : 0;
 
   // Strong breakout + volume spike → +2 (allows trade WITHOUT pullback zone)
   const breakoutMatch =
@@ -2000,8 +2016,62 @@ function computeSignalScore(
   const atrPct = ind.atr / Math.max(ind.ema20, 1);
   const volatility = atrPct > 0.005 ? -1 : 0;
 
-  const total = ema + htfScore + momentum + pullback + confirmation + breakout + trap + volatility;
-  return { ema, htf: htfScore, momentum, pullback, confirmation, breakout, trap, volatility, total };
+  // ── Volume Confirmation (per spec — volume is a BOOSTER, never a blocker) ──
+  // We only score volume when we actually have it. Yahoo intraday feeds
+  // sometimes return 0-volume bars for futures; in that case all volume axes
+  // collapse to 0 so a missing feed doesn't penalise the setup.
+  const hasVolume    = ind.volumeAvg > 0 && ind.volumeLast > 0;
+  const volAboveAvg  = hasVolume && ind.volumeLast > ind.volumeAvg;
+  const volSpike1p5x = hasVolume && ind.volumeLast > ind.volumeAvg * 1.5;
+
+  // STEP 2 — standalone volume score (always added, never blocks):
+  //   > 1.5× avg → +2 (institutional activity)
+  //   >  1× avg  → +1 (normal confirmation)
+  //   else       →  0 (do NOT block)
+  const volume =
+    volSpike1p5x ? 2 :
+    volAboveAvg  ? 1 :
+                   0;
+
+  // STEP 3 — breakout validation: a breakout WITHOUT volume is suspect.
+  //   breakout + vol > avg → +2 (valid)
+  //   breakout + vol ≤ avg → −1 (weak / possible fake)
+  //   no breakout         →  0
+  // Only applies when we actually have volume data; otherwise stays neutral.
+  let breakoutVolume = 0;
+  if (breakoutMatch && hasVolume) breakoutVolume = volAboveAvg ? 2 : -1;
+
+  // STEP 4 — pullback validation: zone + reversal candle WITH volume = strong
+  // entry; without volume the trade is still allowed (base pullback +
+  // confirmation already scored above), this is purely a bonus.
+  const pullbackVolume = (zoneMatch && reversalCandle && volAboveAvg) ? 2 : 0;
+
+  // STEP 5 — stop hunt detection: a long wick on the OPPOSITE side of the
+  // intended trade, printed on above-average volume, is a classic liquidity
+  // grab. wickRatio ≥ 1.5 = "long wick", wick must dominate the body and sit
+  // on the side where stops would have been swept (lower wick for BUYs, upper
+  // wick for SELLs).
+  const longWickThreshold = 1.5;
+  const dominantWick = side === "BUY" ? ind.lowerWick : ind.upperWick;
+  const otherWick    = side === "BUY" ? ind.upperWick : ind.lowerWick;
+  const longWickAgainstSide =
+    ind.wickRatio >= longWickThreshold &&
+    dominantWick > otherWick &&
+    dominantWick >= ind.body * longWickThreshold;
+  const stopHunt = (longWickAgainstSide && volAboveAvg) ? 2 : 0;
+
+  // STEP 6 — final score = base score + volumeScore + (vol-conditional bonuses)
+  const total =
+    ema + htfScore + momentum + pullback + confirmation + breakout +
+    trap + volatility +
+    volume + breakoutVolume + pullbackVolume + stopHunt;
+
+  return {
+    ema, htf: htfScore, momentum, pullback, confirmation, breakout,
+    trap, volatility,
+    volume, breakoutVolume, pullbackVolume, stopHunt,
+    total,
+  };
 }
 
 function pickDirectionByScore(
@@ -2035,7 +2105,16 @@ function buildScoreLabel(
     score.pullback     > 0 ? "PULLBACK" :
     score.breakout     > 0 ? "BREAKOUT" :
                              "TREND";
-  return `${strength} ${side} · ${source} · HTF ${mtfAlign}`;
+  // Volume / stop-hunt tags are appended when meaningful so the user can see
+  // the booster at a glance. Order: STOP-HUNT > VOL+ (spike) > VOL · WEAK
+  // (breakout that lacked volume = -1 axis). All purely informational.
+  const tags: string[] = [];
+  if (score.stopHunt > 0)              tags.push("STOP-HUNT");
+  if (score.volume === 2)              tags.push("VOL+");
+  else if (score.volume === 1)         tags.push("VOL");
+  if (score.breakoutVolume < 0)        tags.push("WEAK BREAKOUT");
+  const tagSuffix = tags.length ? ` · ${tags.join(" · ")}` : "";
+  return `${strength} ${side} · ${source} · HTF ${mtfAlign}${tagSuffix}`;
 }
 
 // ── Risk filters that should still apply (non-strictness related) ─────────────
@@ -2192,6 +2271,9 @@ function runScoreEngine(
       ema: score.ema, htf: score.htf, momentum: score.momentum,
       pullback: score.pullback, confirmation: score.confirmation,
       breakout: score.breakout, trap: score.trap, volatility: score.volatility,
+      volume: score.volume, breakoutVolume: score.breakoutVolume,
+      pullbackVolume: score.pullbackVolume, stopHunt: score.stopHunt,
+      total: score.total,
     },
     zoneStatus: ind.zoneStatus,
     pullbackConfirmation: ind.pullbackConfirmation,

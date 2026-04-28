@@ -349,16 +349,27 @@ components:
           description: Weighted setup score, typically -3..+10. Confidence = (score / 10) * 100.
         scoreBreakdown:
           type: object
-          description: Per-axis score contributions (EMA, HTF, momentum, pullback, confirmation, breakout, trap, volatility).
+          description: |
+            Per-axis score contributions. Base axes: ema/htf/momentum/pullback/
+            confirmation/breakout/trap/volatility. Volume axes (boosters only —
+            never block a trade): `volume` (+0/+1/+2 from current vs 20-bar SMA),
+            `breakoutVolume` (+2 valid / -1 weak / 0), `pullbackVolume` (+2 bonus
+            when zone+rejection prints with above-avg volume), `stopHunt` (+2
+            long opposite-side wick + above-avg volume = liquidity grab).
           properties:
-            ema:           { type: number }
-            htf:           { type: number }
-            momentum:      { type: number }
-            pullback:      { type: number }
-            confirmation:  { type: number }
-            breakout:      { type: number }
-            trap:          { type: number }
-            volatility:    { type: number }
+            ema:            { type: number }
+            htf:            { type: number }
+            momentum:       { type: number }
+            pullback:       { type: number }
+            confirmation:   { type: number }
+            breakout:       { type: number }
+            trap:           { type: number }
+            volatility:     { type: number }
+            volume:         { type: number }
+            breakoutVolume: { type: number }
+            pullbackVolume: { type: number }
+            stopHunt:       { type: number }
+            total:          { type: number }
         entryQuality:
           type: string
           enum: [EARLY, CONFIRMED]

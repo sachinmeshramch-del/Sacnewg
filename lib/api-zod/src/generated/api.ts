@@ -176,10 +176,15 @@ export const GetSignalResponse = zod.object({
       breakout: zod.number().optional(),
       trap: zod.number().optional(),
       volatility: zod.number().optional(),
+      volume: zod.number().optional(),
+      breakoutVolume: zod.number().optional(),
+      pullbackVolume: zod.number().optional(),
+      stopHunt: zod.number().optional(),
+      total: zod.number().optional(),
     })
     .optional()
     .describe(
-      "Per-axis score contributions (EMA, HTF, momentum, pullback, confirmation, breakout, trap, volatility).",
+      "Per-axis score contributions. Base axes: ema\/htf\/momentum\/pullback\/\nconfirmation\/breakout\/trap\/volatility. Volume axes (boosters only —\nnever block a trade): `volume` (+0\/+1\/+2 from current vs 20-bar SMA),\n`breakoutVolume` (+2 valid \/ -1 weak \/ 0), `pullbackVolume` (+2 bonus\nwhen zone+rejection prints with above-avg volume), `stopHunt` (+2\nlong opposite-side wick + above-avg volume = liquidity grab).\n",
     ),
   entryQuality: zod
     .enum(["EARLY", "CONFIRMED"])
