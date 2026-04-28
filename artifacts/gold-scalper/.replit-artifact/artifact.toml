@@ -10,7 +10,7 @@ name = "react-vite"
 version = "1.0.0"
 
 [[services]]
-localPort = 23682
+localPort = 5000
 name = "web"
 paths = ["/"]
 
@@ -18,8 +18,9 @@ paths = ["/"]
 run = "pnpm --filter @workspace/gold-scalper run dev"
 
 [services.env]
-PORT = "23682"
+PORT = "5000"
 BASE_PATH = "/"
+API_PROXY_TARGET = "http://localhost:8080"
 
 [services.production]
 build = ["pnpm", "--filter", "@workspace/gold-scalper", "run", "build"]
