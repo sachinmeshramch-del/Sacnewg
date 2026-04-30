@@ -179,6 +179,7 @@ interface SignalMemory {
   signal: "BUY" | "SELL";
   price: number;
   timestamp: number;
+  confidence: number;
 }
 
 const lastSignalMemory: Record<string, SignalMemory | null> = {
@@ -204,6 +205,7 @@ interface ActiveTrade {
   stopLoss: number;
   takeProfit: number;
   timestamp: number;
+  confidence: number;
 }
 
 const activeTrade: Record<string, ActiveTrade | null> = {
@@ -435,6 +437,12 @@ interface ExtendedIndicators extends Indicators {
   volumeSpike: boolean;
   strongBreakoutBuy: boolean;
   strongBreakoutSell: boolean;
+  // Impulse cascade — fires when ≥3 of the last 4 candles closed in the same
+  // direction AND cumulative move ≥ 1.5× ATR. Catches multi-candle breakdowns
+  // / breakouts that single-candle breakout detection misses (e.g. price
+  // falls $30+ over 5 sequential red candles without one decisive break bar).
+  impulseCascadeBuy: boolean;
+  impulseCascadeSell: boolean;
 }
 
 const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
@@ -851,6 +859,25 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
   const strongBreakoutBuy  = breaksRes && lastCandleBullish && wideBody  && (volumeSpike || veryWideBody);
   const strongBreakoutSell = breaksSup && !lastCandleBullish && wideBody && (volumeSpike || veryWideBody);
 
+  // ── Impulse cascade detection ───────────────────────────────────────────
+  // ≥3 of the last 4 candles closed in the same direction AND cumulative
+  // move over those 4 candles ≥ 1.5× ATR. Catches fast multi-candle moves
+  // that single-bar breakout detection misses — e.g. price falling $30+
+  // over 5 red candles without one decisive break bar.
+  const impulseLookback = 4;
+  let bullCount = 0;
+  let bearCount = 0;
+  const cascadeStartIdx = Math.max(0, last - impulseLookback + 1);
+  for (let i = cascadeStartIdx; i <= last; i++) {
+    if (closes[i] > opens[i]) bullCount++;
+    else if (closes[i] < opens[i]) bearCount++;
+  }
+  const cascadeStartClose = closes[cascadeStartIdx] ?? lastClose;
+  const cumulativeMove = lastClose - cascadeStartClose;
+  const meaningfulCascade = atr > 0 && Math.abs(cumulativeMove) >= atr * 1.5;
+  const impulseCascadeBuy  = bullCount >= 3 && cumulativeMove > 0 && meaningfulCascade;
+  const impulseCascadeSell = bearCount >= 3 && cumulativeMove < 0 && meaningfulCascade;
+
   return {
     rsi, ema20, ema50,
     macdLine, macdSignal, macdHistogram,
@@ -875,6 +902,8 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     volumeSpike,
     strongBreakoutBuy,
     strongBreakoutSell,
+    impulseCascadeBuy,
+    impulseCascadeSell,
   };
 }
 
@@ -1950,6 +1979,11 @@ interface ScoreBreakdown {
   pullback: number;
   confirmation: number;
   breakout: number;
+  // Impulse cascade matches direction → +2. Captures fast multi-candle moves
+  // that the single-bar breakout axis misses. ALSO softens the HTF contra
+  // penalty from -2 to 0 when the cascade fires against HTF (counter-trend
+  // impulses are valid reversal candidates, not bad trades).
+  impulse: number;
   trap: number;
   volatility: number;
   // ── Volume confirmation axes (per spec — volume NEVER blocks a trade) ───
@@ -1993,7 +2027,8 @@ function computeSignalScore(
     (side === "BUY"  && emaBull) ||
     (side === "SELL" && emaBear) ? 2 : 0;
 
-  // HTF (15m) → +2 supportive, −2 contra, 0 neutral
+  // HTF (15m) → +2 supportive, −2 contra, 0 neutral. Contra penalty is
+  // softened to 0 when an impulse cascade matches the trade side (see below).
   let htfScore = 0;
   if (htf === "BULLISH") htfScore = side === "BUY"  ? 2 : -2;
   else if (htf === "BEARISH") htfScore = side === "SELL" ? 2 : -2;
@@ -2021,6 +2056,16 @@ function computeSignalScore(
     (side === "BUY"  && ind.strongBreakoutBuy) ||
     (side === "SELL" && ind.strongBreakoutSell);
   const breakout = breakoutMatch ? 2 : 0;
+
+  // Impulse cascade matches direction → +2. Catches multi-candle moves
+  // (≥3 of last 4 candles same direction, cumulative move ≥ 1.5× ATR) that
+  // single-bar breakout detection misses. ALSO softens the HTF contra
+  // penalty so a counter-trend impulsive reversal isn't double-penalised.
+  const impulseMatch =
+    (side === "BUY"  && ind.impulseCascadeBuy) ||
+    (side === "SELL" && ind.impulseCascadeSell);
+  const impulse = impulseMatch ? 2 : 0;
+  if (impulseMatch && htfScore === -2) htfScore = 0;
 
   // Trap against direction → −2 (e.g. FAKE_BREAKOUT_SELL while scoring BUY)
   let trap = 0;
@@ -2080,12 +2125,12 @@ function computeSignalScore(
 
   // STEP 6 — final score = base score + volumeScore + (vol-conditional bonuses)
   const total =
-    ema + htfScore + momentum + pullback + confirmation + breakout +
+    ema + htfScore + momentum + pullback + confirmation + breakout + impulse +
     trap + volatility +
     volume + breakoutVolume + pullbackVolume + stopHunt;
 
   return {
-    ema, htf: htfScore, momentum, pullback, confirmation, breakout,
+    ema, htf: htfScore, momentum, pullback, confirmation, breakout, impulse,
     trap, volatility,
     volume, breakoutVolume, pullbackVolume, stopHunt,
     total,
@@ -2146,20 +2191,29 @@ function applySoftRiskFilters(
 ): Omit<SignalResult, "timestamp"> {
   if (result.signal !== "BUY" && result.signal !== "SELL") return result;
 
-  // Active trade in this TF — convert to HOLD with reason
+  // All three guards below honour a "higher-confidence override": if the new
+  // signal carries strictly higher confidence than the blocker, it passes
+  // through. The overwrite at the end of getSignal() then replaces the
+  // blocker with the stronger setup. This way a fresh STRONG signal is
+  // never silenced by a stale lower-conviction one.
+
+  // Active trade in this TF — convert to HOLD unless the new signal is
+  // higher conviction than the one that opened the active trade.
   const active = checkActiveTrade(tfKey, currentPrice);
-  if (active) {
+  if (active && result.confidence <= active.confidence) {
     return {
       ...result,
       signal: "HOLD",
       blockReason: `Active ${active.signal} trade in flight`,
-      // keep score/strength so UI still shows context
     };
   }
 
-  // 3-min cooldown after the previous confirmed signal
+  // 3-min cooldown after the previous confirmed signal — overridden by a
+  // higher-confidence signal so strong reversals / fresh setups still fire.
   const last = lastSignalMemory[tfKey];
-  if (last && Date.now() - last.timestamp < COOLDOWN_MS) {
+  if (last &&
+      Date.now() - last.timestamp < COOLDOWN_MS &&
+      result.confidence <= last.confidence) {
     return {
       ...result,
       signal: "HOLD",
@@ -2167,9 +2221,15 @@ function applySoftRiskFilters(
     };
   }
 
-  // Anti-stacking — same direction within 8pts of last signal
+  // Anti-stacking — same direction within 8pts of last signal.
+  // Only blocks STRONG (≥65 confidence) signals to avoid pyramiding into the
+  // same level. MODERATE / WEAK signals (50–64) are allowed through and get
+  // sorted into the WATCHLIST / PENDING tables instead of being silenced.
+  // Also allows higher-confidence stacks to override a weaker prior signal.
   if (last && last.signal === result.signal &&
-      Math.abs(currentPrice - last.price) < PRICE_DENSITY_RANGE_PTS) {
+      Math.abs(currentPrice - last.price) < PRICE_DENSITY_RANGE_PTS &&
+      result.confidence >= 65 &&
+      result.confidence <= last.confidence) {
     return {
       ...result,
       signal: "HOLD",
@@ -2288,7 +2348,8 @@ function runScoreEngine(
     scoreBreakdown: {
       ema: score.ema, htf: score.htf, momentum: score.momentum,
       pullback: score.pullback, confirmation: score.confirmation,
-      breakout: score.breakout, trap: score.trap, volatility: score.volatility,
+      breakout: score.breakout, impulse: score.impulse,
+      trap: score.trap, volatility: score.volatility,
       volume: score.volume, breakoutVolume: score.breakoutVolume,
       pullbackVolume: score.pullbackVolume, stopHunt: score.stopHunt,
       total: score.total,
@@ -2469,6 +2530,7 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       signal: decisionSignal as "BUY" | "SELL",
       price: currentPrice,
       timestamp: Date.now(),
+      confidence: filteredResult.confidence,
     };
     activeTrade[tfKey] = {
       signal: decisionSignal as "BUY" | "SELL",
@@ -2476,6 +2538,7 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       stopLoss: filteredResult.stopLoss,
       takeProfit: filteredResult.takeProfit,
       timestamp: Date.now(),
+      confidence: filteredResult.confidence,
     };
   }
 

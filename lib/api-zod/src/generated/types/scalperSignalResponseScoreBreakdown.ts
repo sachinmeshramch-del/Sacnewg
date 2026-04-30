@@ -22,6 +22,8 @@ export type ScalperSignalResponseScoreBreakdown = {
   pullback?: number;
   confirmation?: number;
   breakout?: number;
+  /** +2 when ≥3 of last 4 candles closed in trade direction with cumulative move ≥ 1.5× ATR. Catches multi-candle breakdowns/breakouts. Also softens HTF contra penalty (−2 → 0) when impulse fires against HTF. */
+  impulse?: number;
   trap?: number;
   volatility?: number;
   volume?: number;

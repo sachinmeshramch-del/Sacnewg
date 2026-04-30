@@ -174,6 +174,12 @@ export const GetSignalResponse = zod.object({
       pullback: zod.number().optional(),
       confirmation: zod.number().optional(),
       breakout: zod.number().optional(),
+      impulse: zod
+        .number()
+        .optional()
+        .describe(
+          "+2 when ≥3 of last 4 candles closed in trade direction with cumulative move ≥ 1.5× ATR. Catches multi-candle breakdowns\/breakouts. Also softens HTF contra penalty (−2 → 0) when impulse fires against HTF.",
+        ),
       trap: zod.number().optional(),
       volatility: zod.number().optional(),
       volume: zod.number().optional(),
