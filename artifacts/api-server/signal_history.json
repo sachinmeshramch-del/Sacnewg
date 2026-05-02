@@ -1,6 +1,36 @@
 {
   "items": [
     {
+      "id": 142,
+      "signal": "SELL",
+      "confidence": 60,
+      "entry": 4615.4,
+      "stopLoss": 4615.41,
+      "takeProfit": 4615.38,
+      "trend": "BEARISH",
+      "timeframe": "5m",
+      "timestamp": "2026-05-02T05:02:43.264Z",
+      "outcome": "PENDING",
+      "permission": "WATCHLIST",
+      "signalStatus": "CONFIRMED",
+      "signalType": "MODERATE"
+    },
+    {
+      "id": 141,
+      "signal": "SELL",
+      "confidence": 60,
+      "entry": 4615.4,
+      "stopLoss": 4615.41,
+      "takeProfit": 4615.38,
+      "trend": "BEARISH",
+      "timeframe": "5m",
+      "timestamp": "2026-05-02T04:54:06.309Z",
+      "outcome": "PENDING",
+      "permission": "WATCHLIST",
+      "signalStatus": "CONFIRMED",
+      "signalType": "MODERATE"
+    },
+    {
       "id": 140,
       "signal": "BUY",
       "confidence": 40,
@@ -76,5 +106,5 @@
       "signalType": "WEAK"
     }
   ],
-  "counter": 141
+  "counter": 143
 }

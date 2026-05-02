@@ -82,8 +82,11 @@ interface SignalResult {
     pullback: number;
     confirmation: number;
     breakout: number;
+    impulse?: number;
     trap: number;
     volatility: number;
+    // RSI gate: −2 when BUY overbought (RSI ≥ 65) or SELL oversold (RSI ≤ 35).
+    rsiGate?: number;
     // Volume confirmation axes (boosters only — never block a trade).
     volume: number;          // +0/+1/+2 from current vs 20-bar SMA
     breakoutVolume: number;  // +2 valid / -1 weak / 0
@@ -443,6 +446,10 @@ interface ExtendedIndicators extends Indicators {
   // falls $30+ over 5 sequential red candles without one decisive break bar).
   impulseCascadeBuy: boolean;
   impulseCascadeSell: boolean;
+  // Overextension flags — price is > OVEREXTENSION_ATR_MULT × ATR from EMA20.
+  // Used by the score engine to avoid late entries at impulse tops / bottoms.
+  overextendedBuy: boolean;
+  overextendedSell: boolean;
 }
 
 const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
@@ -878,6 +885,12 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
   const impulseCascadeBuy  = bullCount >= 3 && cumulativeMove > 0 && meaningfulCascade;
   const impulseCascadeSell = bearCount >= 3 && cumulativeMove < 0 && meaningfulCascade;
 
+  // Overextension: price is more than OVEREXTENSION_ATR_MULT × ATR away from
+  // EMA20 in the direction of the impulse — signals a late / chasing entry.
+  // The score engine penalises signals fired at these tops/bottoms.
+  const overextendedBuy  = lastClose > ema20 + atr * OVEREXTENSION_ATR_MULT;
+  const overextendedSell = lastClose < ema20 - atr * OVEREXTENSION_ATR_MULT;
+
   return {
     rsi, ema20, ema50,
     macdLine, macdSignal, macdHistogram,
@@ -904,6 +917,8 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     strongBreakoutSell,
     impulseCascadeBuy,
     impulseCascadeSell,
+    overextendedBuy,
+    overextendedSell,
   };
 }
 
@@ -1979,13 +1994,17 @@ interface ScoreBreakdown {
   pullback: number;
   confirmation: number;
   breakout: number;
-  // Impulse cascade matches direction → +2. Captures fast multi-candle moves
-  // that the single-bar breakout axis misses. ALSO softens the HTF contra
-  // penalty from -2 to 0 when the cascade fires against HTF (counter-trend
-  // impulses are valid reversal candidates, not bad trades).
+  // Impulse cascade matches direction → +2 when NOT overextended (healthy move).
+  // → −2 when the cascade fires AT the overextended top/bottom (late-entry
+  // prevention). HTF contra penalty softened to 0 only when cascade is valid
+  // (not at top) to preserve counter-trend reversal logic.
   impulse: number;
   trap: number;
   volatility: number;
+  // RSI gate: prevents overbought BUY (RSI ≥ 65) and oversold SELL (RSI ≤ 35).
+  // Directly implements the spec's "avoid overbought / RSI > 35 for SELL" rule.
+  // → −2 when condition violated, 0 otherwise.
+  rsiGate: number;
   // ── Volume confirmation axes (per spec — volume NEVER blocks a trade) ───
   // volume        : +0/+1/+2 standalone volume score (relative to 20-bar SMA)
   // breakoutVolume: +2 / -1 / 0 — validates breakout vs avg volume
@@ -2051,21 +2070,41 @@ function computeSignalScore(
   const reversalCandle = ind.pullbackConfirmation === "REJECTION_DETECTED";
   const confirmation = (zoneMatch && reversalCandle) ? 2 : 0;
 
-  // Strong breakout + volume spike → +2 (allows trade WITHOUT pullback zone)
+  // Strong breakout + volume spike → +2 (allows trade WITHOUT pullback zone).
+  // Zero out the bonus when price is already overextended in the breakout
+  // direction — chasing a blowout top/bottom is a late entry, not an edge.
   const breakoutMatch =
     (side === "BUY"  && ind.strongBreakoutBuy) ||
     (side === "SELL" && ind.strongBreakoutSell);
-  const breakout = breakoutMatch ? 2 : 0;
+  const breakoutAtTop =
+    (side === "BUY"  && ind.strongBreakoutBuy  && ind.overextendedBuy)  ||
+    (side === "SELL" && ind.strongBreakoutSell && ind.overextendedSell);
+  const breakout = (!breakoutAtTop && breakoutMatch) ? 2 : 0;
 
-  // Impulse cascade matches direction → +2. Catches multi-candle moves
-  // (≥3 of last 4 candles same direction, cumulative move ≥ 1.5× ATR) that
-  // single-bar breakout detection misses. ALSO softens the HTF contra
-  // penalty so a counter-trend impulsive reversal isn't double-penalised.
+  // Impulse cascade → +2 when cascade is healthy (price NOT overextended).
+  // → −2 when the cascade fires AT the overextended top/bottom: this is
+  // the "late entry after momentum spike" pattern the spec forbids. By
+  // penalising it, the engine waits for the pullback to EMA20 / Fib zone
+  // instead of chasing. HTF contra penalty is only softened when the
+  // cascade is valid (not at the overextended extreme).
   const impulseMatch =
     (side === "BUY"  && ind.impulseCascadeBuy) ||
     (side === "SELL" && ind.impulseCascadeSell);
-  const impulse = impulseMatch ? 2 : 0;
-  if (impulseMatch && htfScore === -2) htfScore = 0;
+  const impulseAtTop =
+    (side === "BUY"  && ind.impulseCascadeBuy  && ind.overextendedBuy)  ||
+    (side === "SELL" && ind.impulseCascadeSell && ind.overextendedSell);
+  const impulse = impulseAtTop ? -2 : impulseMatch ? 2 : 0;
+  // Only soften the HTF contra penalty when the impulse is valid (not at top).
+  if (impulseMatch && !impulseAtTop && htfScore === -2) htfScore = 0;
+
+  // RSI gate — spec rules:
+  //   BUY:  RSI ≥ 65 → overbought, avoid entry           → −2
+  //   SELL: RSI ≤ 35 → oversold,   avoid entry           → −2
+  // Pullback entries naturally have RSI in the middle (spec: BUY RSI < 65,
+  // SELL RSI > 35), so valid setups are unaffected by this gate.
+  const rsiGate =
+    (side === "BUY"  && ind.rsi >= 65) ? -2 :
+    (side === "SELL" && ind.rsi <= 35) ? -2 : 0;
 
   // Trap against direction → −2 (e.g. FAKE_BREAKOUT_SELL while scoring BUY)
   let trap = 0;
@@ -2123,15 +2162,15 @@ function computeSignalScore(
     dominantWick >= ind.body * longWickThreshold;
   const stopHunt = (longWickAgainstSide && volAboveAvg) ? 2 : 0;
 
-  // STEP 6 — final score = base score + volumeScore + (vol-conditional bonuses)
+  // STEP 6 — final score = base score + rsiGate + volumeScore + (vol-conditional bonuses)
   const total =
     ema + htfScore + momentum + pullback + confirmation + breakout + impulse +
-    trap + volatility +
+    trap + volatility + rsiGate +
     volume + breakoutVolume + pullbackVolume + stopHunt;
 
   return {
     ema, htf: htfScore, momentum, pullback, confirmation, breakout, impulse,
-    trap, volatility,
+    trap, volatility, rsiGate,
     volume, breakoutVolume, pullbackVolume, stopHunt,
     total,
   };
@@ -2350,6 +2389,7 @@ function runScoreEngine(
       pullback: score.pullback, confirmation: score.confirmation,
       breakout: score.breakout, impulse: score.impulse,
       trap: score.trap, volatility: score.volatility,
+      rsiGate: score.rsiGate,
       volume: score.volume, breakoutVolume: score.breakoutVolume,
       pullbackVolume: score.pullbackVolume, stopHunt: score.stopHunt,
       total: score.total,
