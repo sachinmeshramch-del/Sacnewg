@@ -1,20 +1,35 @@
-import { format } from "date-fns";
+const IST_TIME: Intl.DateTimeFormatOptions = {
+  timeZone: "Asia/Kolkata",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: true,
+};
 
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // UTC+5:30
+const IST_DATETIME: Intl.DateTimeFormatOptions = {
+  timeZone: "Asia/Kolkata",
+  month: "short",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+};
 
-function toIST(date: Date | string | number): Date {
-  const d = new Date(date);
-  return new Date(d.getTime() + IST_OFFSET_MS);
-}
+const IST_DATE: Intl.DateTimeFormatOptions = {
+  timeZone: "Asia/Kolkata",
+  month: "short",
+  day: "2-digit",
+  year: "numeric",
+};
 
 export function formatTimeIST(date: Date | string | number): string {
-  return format(toIST(date), "hh:mm:ss a");
+  return new Date(date).toLocaleString("en-IN", IST_TIME);
 }
 
 export function formatDateTimeIST(date: Date | string | number): string {
-  return format(toIST(date), "MMM dd, hh:mm a");
+  return new Date(date).toLocaleString("en-IN", IST_DATETIME);
 }
 
 export function formatDateIST(date: Date | string | number): string {
-  return format(toIST(date), "MMM dd, yyyy");
+  return new Date(date).toLocaleString("en-IN", IST_DATE);
 }
