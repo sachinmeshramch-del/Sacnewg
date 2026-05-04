@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { format } from "date-fns";
+import { formatTimeIST, formatDateIST } from "@/lib/time";
 import { Activity, Radio, Cpu } from "lucide-react";
 import { useHealthCheck } from "@workspace/api-client-react";
 
@@ -36,10 +36,10 @@ export function Header() {
         <div className="flex items-center gap-6">
           <div className="hidden md:flex flex-col items-end">
             <span className="text-sm font-numbers font-medium text-foreground">
-              {format(time, "HH:mm:ss")} UTC
+              {formatTimeIST(time)} IST
             </span>
             <span className="text-xs text-muted-foreground">
-              {format(time, "MMM dd, yyyy")}
+              {formatDateIST(time)}
             </span>
           </div>
 

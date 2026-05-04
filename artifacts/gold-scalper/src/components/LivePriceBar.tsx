@@ -1,7 +1,7 @@
 import { useLivePrice } from "@/hooks/use-trading";
 import { useLiveTick } from "@/hooks/use-tick";
 import { ArrowUpRight, ArrowDownRight, TrendingUp, Minus, Radio } from "lucide-react";
-import { format } from "date-fns";
+import { formatTimeIST } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 
@@ -99,7 +99,7 @@ export function LivePriceBar() {
               {isLive ? "Tick Time" : "Last Updated"}
             </span>
             <span className="text-sm font-numbers font-medium text-foreground/70 mt-0.5">
-              {format(new Date(displayTimestamp), "HH:mm:ss")}
+              {formatTimeIST(displayTimestamp)}
             </span>
           </div>
         </div>

@@ -17,7 +17,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { format } from "date-fns";
+import { formatDateTimeIST } from "@/lib/time";
 import { Clock, Flame, Zap, AlertTriangle, TrendingUp, TrendingDown, Minus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -139,7 +139,7 @@ function SignalTable({
           {rows.map(row => (
             <TableRow key={row.id} className="border-white/5 hover:bg-white/[0.02]">
               <TableCell className="text-xs font-numbers text-muted-foreground whitespace-nowrap">
-                {format(new Date(row.timestamp), "MMM dd, HH:mm")}
+                {formatDateTimeIST(row.timestamp)}
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">{row.timeframe}</TableCell>
               <TableCell>

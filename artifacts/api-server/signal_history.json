@@ -1,77 +1,32 @@
 {
   "items": [
     {
-      "id": 152,
+      "id": 155,
       "signal": "SELL",
       "confidence": 60,
-      "entry": 4562.3,
-      "stopLoss": 4573.06,
-      "takeProfit": 4538.63,
+      "entry": 4566.12,
+      "stopLoss": 4576.75,
+      "takeProfit": 4542.74,
       "trend": "BEARISH",
       "timeframe": "5m",
-      "timestamp": "2026-05-04T10:56:32.489Z",
+      "timestamp": "2026-05-04T11:03:31.667Z",
       "outcome": "PENDING",
       "permission": "QUALIFIED",
       "signalStatus": "CONFIRMED",
       "signalType": "MODERATE"
     },
     {
-      "id": 151,
+      "id": 154,
       "signal": "SELL",
       "confidence": 60,
-      "entry": 4562.32,
-      "stopLoss": 4573.08,
-      "takeProfit": 4538.64,
+      "entry": 4562.6,
+      "stopLoss": 4573,
+      "takeProfit": 4539.72,
       "trend": "BEARISH",
       "timeframe": "5m",
-      "timestamp": "2026-05-04T10:56:19.194Z",
+      "timestamp": "2026-05-04T11:00:02.400Z",
       "outcome": "PENDING",
       "permission": "QUALIFIED",
-      "signalStatus": "PENDING",
-      "signalType": "MODERATE"
-    },
-    {
-      "id": 150,
-      "signal": "SELL",
-      "confidence": 60,
-      "entry": 4562.9,
-      "stopLoss": 4572.97,
-      "takeProfit": 4540.74,
-      "trend": "BEARISH",
-      "timeframe": "5m",
-      "timestamp": "2026-05-04T10:54:23.521Z",
-      "outcome": "PENDING",
-      "permission": "QUALIFIED",
-      "signalStatus": "CONFIRMED",
-      "signalType": "MODERATE"
-    },
-    {
-      "id": 149,
-      "signal": "SELL",
-      "confidence": 70,
-      "entry": 4562.7,
-      "stopLoss": 4572.39,
-      "takeProfit": 4541.38,
-      "trend": "BEARISH",
-      "timeframe": "5m",
-      "timestamp": "2026-05-04T10:42:11.736Z",
-      "outcome": "PENDING",
-      "permission": "ACTIONABLE",
-      "signalStatus": "CONFIRMED",
-      "signalType": "STRONG"
-    },
-    {
-      "id": 148,
-      "signal": "SELL",
-      "confidence": 60,
-      "entry": 4577.09,
-      "stopLoss": 4581.38,
-      "takeProfit": 4567.65,
-      "trend": "BEARISH",
-      "timeframe": "5m",
-      "timestamp": "2026-05-04T08:59:18.256Z",
-      "outcome": "PENDING",
-      "permission": "ACTIONABLE",
       "signalStatus": "CONFIRMED",
       "signalType": "MODERATE"
     },
@@ -91,5 +46,5 @@
       "signalType": "WEAK"
     }
   ],
-  "counter": 153
+  "counter": 156
 }

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Target, ShieldAlert, Coins, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { formatTimeIST } from "@/lib/time";
 
 interface SignalPanelProps {
   timeframe: "1m" | "5m";
@@ -611,7 +611,7 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
               </div>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <RefreshCw className={cn("h-3 w-3", isFetching && "animate-spin")} />
-                <span className="font-numbers">{format(new Date(data.timestamp), "HH:mm:ss")}</span>
+                <span className="font-numbers">{formatTimeIST(data.timestamp)}</span>
               </div>
             </div>
 
