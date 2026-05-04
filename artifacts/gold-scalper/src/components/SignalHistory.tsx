@@ -263,7 +263,7 @@ export function SignalHistory() {
   const allRows = useMemo<SignalRow[]>(() => {
     if (!data?.signals) return [];
     return data.signals
-      .map(s => ({
+      .map((s: Record<string, unknown>) => ({
         id: s.id,
         signal: s.signal,
         confidence: s.confidence,
@@ -273,9 +273,9 @@ export function SignalHistory() {
         trend: s.trend,
         timeframe: s.timeframe,
         timestamp: s.timestamp,
-        strength: ((s as { signalType?: Strength }).signalType ?? classify(s.confidence)) as Strength,
+        strength: ((s.signalType as Strength | undefined) ?? classify(s.confidence as number)) as Strength,
       }))
-      .filter(r => r.strength !== "IGNORE");
+      .filter((r: Record<string, unknown>) => r.strength !== "IGNORE");
   }, [data]);
 
   // Dedup by id first, then sort by confidence DESC (highest first), with

@@ -96,6 +96,10 @@ long opposite-side wick + above-avg volume = liquidity grab).
   pullbackStrength?: "STRONG_TREND" | "PULLBACK" | "WEAK_PULLBACK" | "NO_TRADE";
   /** RSI momentum direction vs previous bar — RISING / FALLING / FLAT. */
   rsiDirection?: "RISING" | "FALLING" | "FLAT";
+  /** Entry mode — AUTO = momentum candle triggered; CONFIRMED = pullback fully confirmed; WAITING = accumulating confirmation. */
+  entryMode?: "AUTO" | "CONFIRMED" | "WAITING";
+  /** High-level category driving the main label — MOMENTUM / PULLBACK / TREND / REVERSAL. */
+  signalCategory?: "MOMENTUM" | "PULLBACK" | "TREND" | "REVERSAL";
   /** Trend Memory — directional bias from net price move over the last 5–10 candles. Overrides SIDEWAYS classification when the recent move is strong, preventing false sideways during pullbacks. */
   momentumBias?: ScalperSignalResponseMomentumBias;
   /** Trend Memory — signed momentum score = (close[t] − close[t−8]) / (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias. */

@@ -240,6 +240,18 @@ export const GetSignalResponse = zod.object({
     .describe(
       "RSI momentum direction vs previous bar — RISING = RSI bouncing up (BUY confirmation); FALLING = RSI dropping (SELL confirmation); FLAT = no meaningful change.",
     ),
+  entryMode: zod
+    .enum(["AUTO", "CONFIRMED", "WAITING"])
+    .optional()
+    .describe(
+      "Entry mode — AUTO = momentum candle triggered (no waiting); CONFIRMED = pullback zone conditions all met; WAITING = trend signal accumulating confirmation.",
+    ),
+  signalCategory: zod
+    .enum(["MOMENTUM", "PULLBACK", "TREND", "REVERSAL"])
+    .optional()
+    .describe(
+      "High-level signal category — MOMENTUM = strong candle + 3 consecutive + strong EMA sep; PULLBACK = near-EMA retracement confirmed; TREND = score-engine trend; REVERSAL = trap pattern.",
+    ),
   momentumBias: zod
     .enum(["BULLISH", "BEARISH", "NEUTRAL"])
     .optional()

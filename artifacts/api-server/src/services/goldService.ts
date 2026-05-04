@@ -64,7 +64,14 @@ interface SignalResult {
   marketRegime?: "TRENDING_BULL" | "TRENDING_BEAR" | "RANGING" | "CHOPPY" | "TRANSITION";
   signalLabel?: string;
   signalStatus?: "PENDING" | "CONFIRMED";
-  signalType?: "TREND" | "REVERSAL";
+  signalType?: "TREND" | "REVERSAL" | "MOMENTUM" | "PULLBACK";
+  // Entry-mode classification for the UI:
+  //   AUTO      = momentum candle triggered — no waiting required
+  //   CONFIRMED = pullback zone + all 3 confirmation conditions met
+  //   WAITING   = trend signal, confirmation still accumulating
+  entryMode?: "AUTO" | "CONFIRMED" | "WAITING";
+  // High-level category used for the main signal label badge.
+  signalCategory?: "MOMENTUM" | "PULLBACK" | "TREND" | "REVERSAL";
   higherTrend?: "BULLISH" | "BEARISH" | "NEUTRAL";
   // mtfStatus: SUPPORTIVE = HTF agrees with entry; NEUTRAL = HTF flat;
   // CONTRA = HTF disagrees (trade is allowed, just scores -2 on HTF axis).
@@ -265,10 +272,13 @@ function canTakeTrade(
   currentPrice: number,
   atr: number,
   tf: string,
+  isStrongTrend = false,
 ): TradeDecision {
   const trades = activeTrades[tf] ?? [];
   if (trades.length >= MAX_ACTIVE_TRADES) return { status: "LIMIT_REACHED" };
-  const minDist = atr * MIN_ENTRY_DISTANCE_ATR;
+  // In a strong trend allow closer stacking (0.4× ATR) — the extra momentum
+  // justifies tighter pyramiding. Sideways / weak trends keep the wider gate.
+  const minDist = isStrongTrend ? atr * 0.4 : atr * MIN_ENTRY_DISTANCE_ATR;
   const sameDirTrades = trades.filter(t => t.signal === signal);
   if (sameDirTrades.length > 0) {
     const last = sameDirTrades[sameDirTrades.length - 1];
@@ -507,6 +517,17 @@ interface ExtendedIndicators extends Indicators {
   rsiRising: boolean;     // RSI increased meaningfully vs prev bar (> +0.3)
   rsiDecreasing: boolean; // RSI dropped meaningfully vs prev bar (> −0.3)
   rsiFlat: boolean;       // RSI essentially unchanged — no confirmation
+  // ── Market mode detection ──────────────────────────────────────────────
+  isTrending: boolean;    // |EMA20 - EMA50| > ATR × 0.5
+  isStrongTrend: boolean; // |EMA20 - EMA50| > ATR × 1.0
+  // ── Momentum entry conditions ─────────────────────────────────────────
+  strongCandleBuy: boolean;  // last candle bullish AND body > ATR × 1.2
+  strongCandleSell: boolean; // last candle bearish AND body > ATR × 1.2
+  last3Bullish: boolean;     // last 3 closed candles all bullish
+  last3Bearish: boolean;     // last 3 closed candles all bearish
+  // ── Improved pullback conditions ──────────────────────────────────────
+  pullbackConfirmedBuy: boolean;  // near EMA20 + bullish candle + breaks prev high
+  pullbackConfirmedSell: boolean; // near EMA20 + bearish candle + breaks prev low
 }
 
 const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
@@ -958,6 +979,37 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
   const overextendedBuy  = lastClose > ema20 + atr * OVEREXTENSION_ATR_MULT;
   const overextendedSell = lastClose < ema20 - atr * OVEREXTENSION_ATR_MULT;
 
+  // ── Market mode detection ──────────────────────────────────────────────────
+  // isTrending    = EMAs meaningfully separated (> 0.5× ATR apart)
+  // isStrongTrend = very clear EMA separation (> 1.0× ATR apart)
+  const emaSeparation  = Math.abs(ema20 - ema50);
+  const isTrending     = atr > 0 && emaSeparation > atr * 0.5;
+  const isStrongTrend  = atr > 0 && emaSeparation > atr * 1.0;
+
+  // ── Momentum entry conditions ─────────────────────────────────────────────
+  // A "strong candle" has a body wider than 1.2× ATR — it signals commitment.
+  // Combined with 3 consecutive same-direction candles it confirms momentum.
+  const STRONG_CANDLE_MULT = 1.2;
+  const strongCandleBuy  =  lastCandleBullish && body >= atr * STRONG_CANDLE_MULT;
+  const strongCandleSell = !lastCandleBullish && body >= atr * STRONG_CANDLE_MULT;
+
+  const last3Bullish = last >= 2 &&
+    closes[last]   > opens[last]   &&
+    closes[last-1] > opens[last-1] &&
+    closes[last-2] > opens[last-2];
+
+  const last3Bearish = last >= 2 &&
+    closes[last]   < opens[last]   &&
+    closes[last-1] < opens[last-1] &&
+    closes[last-2] < opens[last-2];
+
+  // ── Improved pullback confirmation ────────────────────────────────────────
+  // Price within 0.6× ATR of EMA20 ("near EMA") — the ideal retracement zone.
+  // Directional candle + break of the previous bar's high/low = full confirm.
+  const isNearEMA            = atr > 0 && Math.abs(lastClose - ema20) <= atr * 0.6;
+  const pullbackConfirmedBuy  = ema20 > ema50 && isNearEMA &&  lastCandleBullish && breaksPrevHigh;
+  const pullbackConfirmedSell = ema20 < ema50 && isNearEMA && !lastCandleBullish && breaksPrevLow;
+
   return {
     rsi, ema20, ema50,
     macdLine, macdSignal, macdHistogram,
@@ -990,6 +1042,14 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     rsiRising,
     rsiDecreasing,
     rsiFlat,
+    isTrending,
+    isStrongTrend,
+    strongCandleBuy,
+    strongCandleSell,
+    last3Bullish,
+    last3Bearish,
+    pullbackConfirmedBuy,
+    pullbackConfirmedSell,
   };
 }
 
@@ -2348,6 +2408,7 @@ function applySoftRiskFilters(
   result: Omit<SignalResult, "timestamp">,
   tfKey: string,
   currentPrice: number,
+  isStrongTrend = false,
 ): Omit<SignalResult, "timestamp"> {
   if (result.signal !== "BUY" && result.signal !== "SELL") return result;
 
@@ -2365,9 +2426,10 @@ function applySoftRiskFilters(
     const atrForGate  = Math.max(result.indicators.atr, 1e-6);
     const isReversal  = result.signalType === "REVERSAL";
     // Reversal signals always get an ALLOW — they flip the position.
+    // Momentum signals in a strong trend use the tighter 0.4× ATR gate.
     const decision    = isReversal
       ? { status: "ALLOW" as const }
-      : canTakeTrade(result.signal, currentPrice, atrForGate, tfKey);
+      : canTakeTrade(result.signal, currentPrice, atrForGate, tfKey, isStrongTrend);
     const entryTyp    = getEntryType(result.signal, tfKey, isReversal);
     const activeCount = (activeTrades[tfKey] ?? []).length;
 
@@ -2481,6 +2543,65 @@ function runScoreEngine(
   if (ind.trap === "FAKE_BREAKOUT_SELL" || ind.trap === "STOP_HUNT_SELL") forcedSide = "SELL";
   if (ind.trap === "FAKE_BREAKDOWN_BUY" || ind.trap === "STOP_HUNT_BUY")  forcedSide = "BUY";
 
+  // ── Fast Momentum Entry Path ──────────────────────────────────────────────
+  // Fires when a strong trend is confirmed AND a power candle + 3 consecutive
+  // candles in the trend direction appear. This captures fast-moving markets
+  // BEFORE the score engine would catch them — no "WAITING" required.
+  // Skipped when a trap override is already in play (trap = higher priority).
+  const momentumBuy  = !forcedSide && ind.isStrongTrend && ind.ema20 > ind.ema50
+    && ind.strongCandleBuy  && ind.last3Bullish;
+  const momentumSell = !forcedSide && ind.isStrongTrend && ind.ema20 < ind.ema50
+    && ind.strongCandleSell && ind.last3Bearish;
+  const momentumSide: "BUY" | "SELL" | null = momentumBuy ? "BUY" : momentumSell ? "SELL" : null;
+
+  if (momentumSide) {
+    const momMtfAlign = classifyMtfAlignment(momentumSide, htf);
+    // Score the momentum entry using the existing engine (keeps score display honest)
+    const momScore   = computeSignalScore(momentumSide, ind, htf);
+    // Momentum base confidence: score-derived + 20pt boost, +10 if HTF agrees
+    let momConfidence = Math.max(5, Math.min(95, Math.round((momScore.total / 10) * 100)));
+    momConfidence = Math.min(95, momConfidence + 20);
+    if (momMtfAlign === "SUPPORTIVE") momConfidence = Math.min(95, momConfidence + 10);
+
+    const momLabel = `STRONG MOMENTUM ${momentumSide} · AUTO · HTF ${momMtfAlign}`;
+    const momBase  = momentumSide === "BUY"
+      ? makeBuy(currentPrice, ind.atr, momConfidence, marketMode, timeframe, ind, momLabel)
+      : makeSell(currentPrice, ind.atr, momConfidence, marketMode, timeframe, ind, momLabel);
+
+    const momSigStatus = trackConfirmationPersistence(momentumSide, tfKey, lastCandleTs);
+    const momEnriched: Omit<SignalResult, "timestamp"> = {
+      ...momBase,
+      signalStatus:  momSigStatus,
+      signalType:    "MOMENTUM",
+      signalCategory:"MOMENTUM",
+      entryMode:     "AUTO",
+      entryQuality:  "CONFIRMED",
+      higherTrend:   htf,
+      mtfStatus:     momMtfAlign,
+      signalStrength: deriveSignalStrength(momScore.total),
+      score:         momScore.total,
+      scoreBreakdown: {
+        ema: momScore.ema, htf: momScore.htf, momentum: momScore.momentum,
+        pullback: momScore.pullback, confirmation: momScore.confirmation,
+        breakout: momScore.breakout, impulse: momScore.impulse,
+        trap: momScore.trap, volatility: momScore.volatility,
+        rsiGate: momScore.rsiGate,
+        volume: momScore.volume, breakoutVolume: momScore.breakoutVolume,
+        pullbackVolume: momScore.pullbackVolume, stopHunt: momScore.stopHunt,
+        total: momScore.total,
+      },
+      zoneStatus:         ind.zoneStatus,
+      pullbackConfirmation: ind.pullbackConfirmation,
+      pullbackState:      ind.pullbackState,
+      pullbackStrength:   "STRONG_TREND",
+      rsiDirection: (ind.rsiRising ? "RISING" : ind.rsiDecreasing ? "FALLING" : "FLAT") as SignalResult["rsiDirection"],
+      momentumBias:  ind.momentumBias,
+      momentumScore: ind.momentumScore,
+      marketState:   ind.marketState,
+    };
+    return applySoftRiskFilters(momEnriched, tfKey, currentPrice, ind.isStrongTrend);
+  }
+
   let pick: { side: "BUY" | "SELL"; score: ScoreBreakdown } | null;
   if (forcedSide) {
     pick = { side: forcedSide, score: computeSignalScore(forcedSide, ind, htf) };
@@ -2510,14 +2631,58 @@ function runScoreEngine(
       momentumBias: ind.momentumBias,
       momentumScore: ind.momentumScore,
       marketState: ind.marketState,
+      entryMode: "WAITING",
+      signalCategory: "TREND",
     };
   }
 
   const { side, score } = pick;
   const strength = deriveSignalStrength(score.total);
-  // confidence = (score / 10) × 100, clamped 5..95
-  const confidence = Math.max(5, Math.min(95, Math.round((score.total / 10) * 100)));
-  const label = buildScoreLabel(side, strength, score, mtfAlign);
+
+  // ── Confidence with boosting ──────────────────────────────────────────────
+  // Base: (score / 10) × 100, clamped 5..95
+  // +15 in a strong trend (isStrongTrend flag from EMA separation > ATR×1.0)
+  // +10 when the higher timeframe agrees with our direction
+  let confidence = Math.max(5, Math.min(95, Math.round((score.total / 10) * 100)));
+  if (ind.isStrongTrend)          confidence = Math.min(95, confidence + 15);
+  if (mtfAlign === "SUPPORTIVE")  confidence = Math.min(95, confidence + 10);
+
+  // ── Signal category + entry mode ─────────────────────────────────────────
+  // Pullback confirmed = near EMA20 zone + candle direction + prev high/low break
+  const isPullbackConfirmed =
+    (side === "BUY"  && ind.pullbackConfirmedBuy)  ||
+    (side === "SELL" && ind.pullbackConfirmedSell);
+  // Also treat score-engine pullback confirmation as a confirmed pullback
+  const isPullbackScore     = score.confirmation > 0;
+  const isPullback          = isPullbackConfirmed || isPullbackScore;
+
+  const signalCategory: SignalResult["signalCategory"] =
+    forcedSide   ? "REVERSAL" :
+    isPullback   ? "PULLBACK" :
+                   "TREND";
+
+  const entryMode: SignalResult["entryMode"] =
+    isPullback ? "CONFIRMED" :
+    confidence >= 65 ? "CONFIRMED" : "WAITING";
+
+  // Derive pullbackStrength with the improved conditions included
+  const pullbackStrengthVal: SignalResult["pullbackStrength"] =
+    isPullbackConfirmed ? "PULLBACK" :
+    isPullbackScore     ? "PULLBACK" :
+    score.pullback > 0  ? "WEAK_PULLBACK" :
+    ind.isStrongTrend   ? "STRONG_TREND" :
+                          "STRONG_TREND";
+
+  // Build score label — include PULLBACK tag when applicable
+  const scoreSource = isPullback ? "PULLBACK · CONFIRMED" :
+    score.breakout > 0 ? "BREAKOUT" : "TREND";
+  const tags: string[] = [];
+  if (score.stopHunt > 0)     tags.push("STOP-HUNT");
+  if (score.volume === 2)     tags.push("VOL+");
+  else if (score.volume === 1) tags.push("VOL");
+  if (score.breakoutVolume < 0) tags.push("WEAK BREAKOUT");
+  const tagSuffix = tags.length ? ` · ${tags.join(" · ")}` : "";
+  const label = `${strength} ${side} · ${scoreSource} · HTF ${mtfAlign}${tagSuffix}`;
 
   const base = side === "BUY"
     ? makeBuy(currentPrice, ind.atr, confidence, marketMode, timeframe, ind, label)
@@ -2527,12 +2692,17 @@ function runScoreEngine(
   const sigStatus = trackConfirmationPersistence(side, tfKey, lastCandleTs);
   // entryQuality reflects confidence band (kept for UI compat).
   const entryQuality: "EARLY" | "CONFIRMED" = confidence >= 65 ? "CONFIRMED" : "EARLY";
-  const signalType: "TREND" | "REVERSAL" = forcedSide ? "REVERSAL" : "TREND";
+  const signalType: SignalResult["signalType"] =
+    forcedSide   ? "REVERSAL" :
+    isPullback   ? "PULLBACK" :
+                   "TREND";
 
   const enriched: Omit<SignalResult, "timestamp"> = {
     ...base,
     signalStatus: sigStatus,
     signalType,
+    signalCategory,
+    entryMode,
     entryQuality,
     higherTrend: htf,
     mtfStatus: mtfAlign,
@@ -2554,19 +2724,13 @@ function runScoreEngine(
     momentumBias: ind.momentumBias,
     momentumScore: ind.momentumScore,
     marketState: ind.marketState,
-    // Derive pullbackStrength from the score axes for the score-engine path.
-    pullbackStrength: (
-      score.confirmation > 0 ? "PULLBACK" :
-      score.pullback     > 0 ? "WEAK_PULLBACK" :
-      score.breakout     > 0 ? "STRONG_TREND" :
-                               "STRONG_TREND"
-    ) as SignalResult["pullbackStrength"],
+    pullbackStrength: pullbackStrengthVal,
     rsiDirection: (ind.rsiRising ? "RISING" : ind.rsiDecreasing ? "FALLING" : "FLAT") as SignalResult["rsiDirection"],
   };
 
   // Apply only soft risk filters (active trade / cooldown / anti-stacking).
   // These can downgrade to HOLD with a blockReason.
-  return applySoftRiskFilters(enriched, tfKey, currentPrice);
+  return applySoftRiskFilters(enriched, tfKey, currentPrice, ind.isStrongTrend);
 }
 
 export async function getSignal(timeframe: string): Promise<SignalResult> {
@@ -2650,6 +2814,14 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       rsiRising: false,
       rsiDecreasing: false,
       rsiFlat: true,
+      isTrending: false,
+      isStrongTrend: false,
+      strongCandleBuy: false,
+      strongCandleSell: false,
+      last3Bullish: false,
+      last3Bearish: false,
+      pullbackConfirmedBuy: false,
+      pullbackConfirmedSell: false,
     };
   }
 

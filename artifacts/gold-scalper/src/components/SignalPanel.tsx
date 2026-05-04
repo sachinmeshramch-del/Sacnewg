@@ -170,7 +170,7 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
           <div className="space-y-6">
 
             {/* Market Mode Badge */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground">Market Mode:</span>
               <span className={cn(
                 "text-[10px] font-bold tracking-widest px-2 py-0.5 rounded border",
@@ -178,6 +178,11 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
               )}>
                 {data.marketMode ?? "TRENDING"}
               </span>
+              {(data.signalCategory === "MOMENTUM" || data.signalType === "MOMENTUM") && (
+                <span className="text-[10px] font-bold tracking-widest px-2 py-0.5 rounded border border-amber-400/40 bg-amber-400/10 text-amber-300">
+                  ⚡ STRONG TREND
+                </span>
+              )}
               {data.marketMode === "SIDEWAYS" && (
                 <span className="text-[10px] text-warning/80">RSI + MACD signals</span>
               )}
@@ -368,12 +373,67 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
-              {/* Pullback Analysis Panel — always visible when zone/confirmation data exists */}
-              {(data.zoneStatus || data.pullbackConfirmation) && (
+              {/* Signal Analysis Panel — always visible when zone/confirmation data exists */}
+              {(data.zoneStatus || data.pullbackConfirmation || data.entryMode || data.signalCategory) && (
                 <div className="mt-3 w-full max-w-[260px] mx-auto rounded-md border border-border/40 bg-card/40 px-3 py-2 text-[10px] tracking-wide space-y-1.5">
 
-                  {/* Row 1: Pullback Zone YES / NO */}
-                  <div className="flex items-center justify-between">
+                  {/* Row: Signal Type — MOMENTUM / PULLBACK / TREND / REVERSAL */}
+                  {(data.signalCategory || data.signalType) && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Signal Type</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px]",
+                        (data.signalCategory === "MOMENTUM" || data.signalType === "MOMENTUM") ? "text-amber-300" :
+                        (data.signalCategory === "PULLBACK" || data.signalType === "PULLBACK")  ? "text-success" :
+                        (data.signalCategory === "REVERSAL" || data.signalType === "REVERSAL")  ? "text-warning" :
+                        "text-primary",
+                      )}>
+                        {(data.signalCategory === "MOMENTUM" || data.signalType === "MOMENTUM") ? "⚡ MOMENTUM" :
+                         (data.signalCategory === "PULLBACK" || data.signalType === "PULLBACK")  ? "↩ PULLBACK" :
+                         (data.signalCategory === "REVERSAL" || data.signalType === "REVERSAL")  ? "↗ REVERSAL" :
+                         "TREND"}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: Entry Mode — AUTO / CONFIRMED / WAITING */}
+                  {data.entryMode && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Entry Mode</span>
+                      <span className={cn(
+                        "font-bold tracking-widest inline-flex items-center gap-1",
+                        data.entryMode === "AUTO"      ? "text-amber-300" :
+                        data.entryMode === "CONFIRMED" ? "text-success" : "text-warning",
+                      )}>
+                        <span className={cn(
+                          "h-1.5 w-1.5 rounded-full",
+                          data.entryMode === "AUTO"      ? "bg-amber-400 animate-pulse" :
+                          data.entryMode === "CONFIRMED" ? "bg-success" : "bg-warning animate-pulse",
+                        )} />
+                        {data.entryMode === "AUTO"      ? "AUTO — MOMENTUM" :
+                         data.entryMode === "CONFIRMED" ? "CONFIRMED" : "WAITING"}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: Market Mode — STRONG TREND / TRENDING / SIDEWAYS */}
+                  {data.marketMode && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Market Mode</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px]",
+                        (data.signalCategory === "MOMENTUM" || data.signalType === "MOMENTUM") ? "text-amber-300" :
+                        data.marketMode === "TRENDING" ? "text-primary" : "text-warning",
+                      )}>
+                        {(data.signalCategory === "MOMENTUM" || data.signalType === "MOMENTUM")
+                          ? "⚡ STRONG TREND"
+                          : data.marketMode === "TRENDING" ? "TRENDING" : "SIDEWAYS"}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: Pullback Zone YES / NO */}
+                  <div className="flex items-center justify-between pt-1 border-t border-border/30">
                     <span className="text-muted-foreground">Pullback Zone</span>
                     {data.zoneStatus && data.zoneStatus !== "NO_ZONE" ? (
                       <span className={cn(
@@ -391,22 +451,25 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                     )}
                   </div>
 
-                  {/* Row 2: Confirmation WAITING / CONFIRMED */}
+                  {/* Row: Confirmation WAITING / CONFIRMED */}
                   <div className="flex items-center justify-between pt-1 border-t border-border/30">
                     <span className="text-muted-foreground">Confirmation</span>
                     <span className={cn(
                       "font-bold tracking-widest inline-flex items-center gap-1",
-                      data.pullbackConfirmation === "REJECTION_DETECTED" ? "text-success" : "text-warning",
+                      (data.pullbackConfirmation === "REJECTION_DETECTED" || data.entryMode === "CONFIRMED" || data.entryMode === "AUTO")
+                        ? "text-success" : "text-warning",
                     )}>
                       <span className={cn(
                         "h-1.5 w-1.5 rounded-full",
-                        data.pullbackConfirmation === "REJECTION_DETECTED" ? "bg-success" : "bg-warning animate-pulse",
+                        (data.pullbackConfirmation === "REJECTION_DETECTED" || data.entryMode === "CONFIRMED" || data.entryMode === "AUTO")
+                          ? "bg-success" : "bg-warning animate-pulse",
                       )} />
-                      {data.pullbackConfirmation === "REJECTION_DETECTED" ? "CONFIRMED" : "WAITING"}
+                      {(data.pullbackConfirmation === "REJECTION_DETECTED" || data.entryMode === "CONFIRMED" || data.entryMode === "AUTO")
+                        ? "CONFIRMED" : "WAITING"}
                     </span>
                   </div>
 
-                  {/* Row 3: RSI Direction RISING / FALLING / FLAT */}
+                  {/* Row: RSI Direction RISING / FALLING / FLAT */}
                   {data.rsiDirection && (
                     <div className="flex items-center justify-between pt-1 border-t border-border/30">
                       <span className="text-muted-foreground">RSI Direction</span>
@@ -421,18 +484,18 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                     </div>
                   )}
 
-                  {/* Row 4: Signal Class */}
+                  {/* Row: Signal Class */}
                   {data.pullbackStrength && (
                     <div className="flex items-center justify-between pt-1 border-t border-border/30">
                       <span className="text-muted-foreground">Signal Class</span>
                       <span className={cn(
                         "font-bold tracking-widest text-[9px]",
-                        data.pullbackStrength === "STRONG_TREND"  ? "text-primary" :
+                        data.pullbackStrength === "STRONG_TREND"  ? "text-amber-300" :
                         data.pullbackStrength === "PULLBACK"      ? "text-success" :
                         data.pullbackStrength === "WEAK_PULLBACK" ? "text-warning" : "text-muted-foreground",
                       )}>
-                        {data.pullbackStrength === "STRONG_TREND"  ? "STRONG TREND" :
-                         data.pullbackStrength === "PULLBACK"      ? "PULLBACK" :
+                        {data.pullbackStrength === "STRONG_TREND"  ? "⚡ STRONG MOMENTUM" :
+                         data.pullbackStrength === "PULLBACK"      ? "✓ PULLBACK" :
                          data.pullbackStrength === "WEAK_PULLBACK" ? "WEAK PULLBACK" : "NO TRADE"}
                       </span>
                     </div>
@@ -532,14 +595,35 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                       {data.signalStatus}
                     </span>
                   )}
-                  {data.signalType && (
+                  {(data.signalCategory || data.signalType) && (
                     <span className={cn(
                       "px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest border",
-                      data.signalType === "TREND"
-                        ? "text-primary border-primary/30 bg-primary/10"
-                        : "text-warning border-warning/30 bg-warning/10"
+                      (data.signalCategory === "MOMENTUM" || data.signalType === "MOMENTUM")
+                        ? "text-amber-300 border-amber-400/40 bg-amber-400/10"
+                        : (data.signalCategory === "PULLBACK" || data.signalType === "PULLBACK")
+                          ? "text-success border-success/40 bg-success/10"
+                          : (data.signalCategory === "REVERSAL" || data.signalType === "REVERSAL")
+                            ? "text-warning border-warning/30 bg-warning/10"
+                            : "text-primary border-primary/30 bg-primary/10"
                     )}>
-                      {data.signalType === "TREND" ? "TREND TRADE" : "REVERSAL TRADE"}
+                      {(data.signalCategory === "MOMENTUM" || data.signalType === "MOMENTUM") ? "⚡ STRONG MOMENTUM"
+                        : (data.signalCategory === "PULLBACK" || data.signalType === "PULLBACK") ? "↩ PULLBACK"
+                        : (data.signalCategory === "REVERSAL" || data.signalType === "REVERSAL") ? "↗ REVERSAL TRADE"
+                        : "TREND TRADE"}
+                    </span>
+                  )}
+                  {data.entryMode && (
+                    <span className={cn(
+                      "px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest border",
+                      data.entryMode === "AUTO"
+                        ? "text-amber-300 border-amber-400/40 bg-amber-400/10"
+                        : data.entryMode === "CONFIRMED"
+                          ? "text-success border-success/40 bg-success/10"
+                          : "text-muted-foreground border-border/30 bg-card/30",
+                    )}>
+                      {data.entryMode === "AUTO" ? "AUTO ENTRY"
+                        : data.entryMode === "CONFIRMED" ? "✓ CONFIRMED"
+                        : "WAITING"}
                     </span>
                   )}
                   {data.entryType && (
