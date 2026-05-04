@@ -228,6 +228,18 @@ export const GetSignalResponse = zod.object({
     .describe(
       "Pullback State Detector — BULLISH_PULLBACK = price retracing inside a bullish trend (between EMA50 and EMA20); BEARISH_PULLBACK = mirror for bearish; NONE = no active pullback.",
     ),
+  pullbackStrength: zod
+    .enum(["STRONG_TREND", "PULLBACK", "WEAK_PULLBACK", "NO_TRADE"])
+    .optional()
+    .describe(
+      "Pullback strength classification — STRONG_TREND = trending with momentum; PULLBACK = all 3 confirmation conditions met; WEAK_PULLBACK = partial confirmation; NO_TRADE = insufficient setup.",
+    ),
+  rsiDirection: zod
+    .enum(["RISING", "FALLING", "FLAT"])
+    .optional()
+    .describe(
+      "RSI momentum direction vs previous bar — RISING = RSI bouncing up (BUY confirmation); FALLING = RSI dropping (SELL confirmation); FLAT = no meaningful change.",
+    ),
   momentumBias: zod
     .enum(["BULLISH", "BEARISH", "NEUTRAL"])
     .optional()

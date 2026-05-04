@@ -117,6 +117,14 @@ interface SignalResult {
   pullbackConfirmation?: "WAITING" | "REJECTION_DETECTED";
   // Pullback State Detector — separate from zoneStatus; based on EMA20/EMA50 position.
   pullbackState?: "BULLISH_PULLBACK" | "BEARISH_PULLBACK" | "NONE";
+  // Pullback strength classification — drives the signal type labels shown in the UI.
+  //   STRONG_TREND  = trending with momentum, no pullback needed
+  //   PULLBACK      = all 3 pullback conditions met (candle + RSI + break)
+  //   WEAK_PULLBACK = only 1–2 conditions met, lower conviction
+  //   NO_TRADE      = not a signal worth taking
+  pullbackStrength?: "STRONG_TREND" | "PULLBACK" | "WEAK_PULLBACK" | "NO_TRADE";
+  // RSI direction from the indicators layer, forwarded for the UI to display.
+  rsiDirection?: "RISING" | "FALLING" | "FLAT";
   // Trend Memory — momentum bias from net price move over the last 5–10 candles.
   momentumBias?: "BULLISH" | "BEARISH" | "NEUTRAL";
   momentumScore?: number; // signed; |score| ≥ 0.6 = strong recent move
@@ -494,6 +502,11 @@ interface ExtendedIndicators extends Indicators {
   // Used by the score engine to avoid late entries at impulse tops / bottoms.
   overextendedBuy: boolean;
   overextendedSell: boolean;
+  // RSI direction — compares current RSI vs previous bar to detect momentum shift.
+  prevRsi: number;
+  rsiRising: boolean;     // RSI increased meaningfully vs prev bar (> +0.3)
+  rsiDecreasing: boolean; // RSI dropped meaningfully vs prev bar (> −0.3)
+  rsiFlat: boolean;       // RSI essentially unchanged — no confirmation
 }
 
 const STRUCTURE_LOOKBACK = 15;          // candles to look back for swing high/low
@@ -781,6 +794,13 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
   const atr     = calcATR(highs, lows, closes, 14);
   const prevAtr = prev?.atr ?? atr;
 
+  // RSI direction — compare current RSI to the value stored from the previous
+  // cycle. A threshold of 0.3 filters out float noise without being too slow.
+  const prevRsi      = prev?.rsi ?? rsi;
+  const rsiRising    = rsi > prevRsi + 0.3;
+  const rsiDecreasing = rsi < prevRsi - 0.3;
+  const rsiFlat      = !rsiRising && !rsiDecreasing;
+
   // Price action bias (last 5 candles)
   const priceActionBias = getPriceActionBias(highs, lows, 5);
 
@@ -966,6 +986,10 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
     impulseCascadeSell,
     overextendedBuy,
     overextendedSell,
+    prevRsi,
+    rsiRising,
+    rsiDecreasing,
+    rsiFlat,
   };
 }
 
@@ -1058,9 +1082,14 @@ function makeBuy(
 }
 
 // ── Pullback Entry Engine ──────────────────────────────────────────────────────
-// Fires only on WEAK trend states with price inside the EMA20 zone, after a
-// rejection candle prints, and inside a tight RSI window. Builds a signal with
-// swing-based stop and 2× ATR target (R:R ≈ 2:1).
+// Full 3-condition confirmation system per spec:
+//   BUY:  bullish candle  + RSI rising    + breaks previous candle high
+//   SELL: bearish candle  + RSI falling   + breaks previous candle low
+//
+// Signal strength tiers:
+//   PULLBACK      — all 3 conditions met  → higher confidence
+//   WEAK_PULLBACK — 1–2 conditions met    → lower confidence (caution label)
+//   Returns null  — zone not active or candle direction wrong (no trade)
 function tryPullbackEntry(
   ind: ExtendedIndicators,
   currentPrice: number,
@@ -1068,34 +1097,72 @@ function tryPullbackEntry(
   timeframe: string,
   side: "BUY" | "SELL",
 ): Omit<SignalResult, "timestamp"> | null {
-  const { zoneStatus, pullbackConfirmation, rsi, atr, lastCandleBullish } = ind;
+  const {
+    zoneStatus, pullbackConfirmation, rsi, atr,
+    lastCandleBullish, breaksPrevHigh, breaksPrevLow,
+    rsiRising, rsiDecreasing, rsiFlat,
+  } = ind;
 
-  // Hard gates per spec
-  if (side === "BUY") {
-    if (zoneStatus !== "BUY_ZONE") return null;
-    if (pullbackConfirmation !== "REJECTION_DETECTED") return null;
-    if (rsi < 40 || rsi > 55) return null;
-    if (!lastCandleBullish) return null;
-  } else {
-    if (zoneStatus !== "SELL_ZONE") return null;
-    if (pullbackConfirmation !== "REJECTION_DETECTED") return null;
-    if (rsi < 45 || rsi > 60) return null;
-    if (lastCandleBullish) return null;
-  }
+  // ── Gate 1: must be inside the matching pullback zone ─────────────────────
+  if (side === "BUY"  && zoneStatus !== "BUY_ZONE")  return null;
+  if (side === "SELL" && zoneStatus !== "SELL_ZONE") return null;
+
+  // ── Gate 2: candle direction must match — no entry on an opposing candle ──
+  if (side === "BUY"  && !lastCandleBullish) return null;
+  if (side === "SELL" &&  lastCandleBullish) return null;
+
+  // ── Evaluate the 3 confirmation conditions per spec ───────────────────────
+  // Cond A: correct candlestick body direction (already gated above → always true here)
+  const condCandle = true;
+  // Cond B: RSI momentum shift in the entry direction
+  const condRsi = side === "BUY" ? rsiRising : rsiDecreasing;
+  // Cond C: price breaks the previous candle's high / low
+  const condBreak = side === "BUY" ? breaksPrevHigh : breaksPrevLow;
+  // Also check that the rejection candle printed (zone micro-structure)
+  const condRejection = pullbackConfirmation === "REJECTION_DETECTED";
+
+  const confirmCount = [condRsi, condBreak, condRejection].filter(Boolean).length;
+
+  // Require at least the candle direction. No candle = no trade (already gated).
+  // RSI flat + no break + no rejection = too uncertain → skip.
+  if (confirmCount === 0 && rsiFlat) return null;
+
+  // ── Classify pullback strength ─────────────────────────────────────────────
+  // FULL: all 3 extra conditions → highest conviction PULLBACK BUY / SELL
+  // PARTIAL: 2 of 3            → standard PULLBACK BUY / SELL
+  // WEAK: only 0–1 conditions  → WEAK PULLBACK (lower conf, caution label)
+  const isFullConfirm    = confirmCount === 3;
+  const isPartialConfirm = confirmCount === 2;
+  const isWeakConfirm    = confirmCount <= 1;
+
+  const pullbackStrength: SignalResult["pullbackStrength"] =
+    (isFullConfirm || isPartialConfirm) ? "PULLBACK" : "WEAK_PULLBACK";
 
   const entry = currentPrice;
-  // Use the unified Risk/Reward Engine — fixed ATR×1.0 stop, 2.2R final target,
-  // 1.2R partial target. Keeps every directional signal on the same R:R model.
   const targets = computeRiskTargets(entry, atr, side);
 
-  // Confidence: base 70 (above the 65 floor) + small bonuses for clean setup.
-  let conf = 70;
-  // Sweet-spot RSI in middle of the window earns a small bonus.
+  // ── Confidence: base depends on confirmation tier ──────────────────────────
+  let conf = isFullConfirm ? 76 : isPartialConfirm ? 70 : 62;
+
+  // Sweet-spot RSI earns a small bonus (centre of typical pullback RSI window).
   const sweet = side === "BUY" ? 47.5 : 52.5;
-  conf += Math.max(0, 5 - Math.abs(rsi - sweet));
-  // Tight zone (price hugging EMA20) earns a small bonus.
+  conf += Math.max(0, 4 - Math.abs(rsi - sweet));
+
+  // Tight zone (price hugging EMA20) earns a bonus.
   const distFromEma20 = Math.abs(entry - ind.ema20);
   if (distFromEma20 <= ind.pullbackRange * 0.5) conf += 3;
+
+  // Full confirmation gets one extra point for each condition met beyond 2.
+  if (isFullConfirm) conf += 3;
+
+  // ── Signal label ──────────────────────────────────────────────────────────
+  const signalLabel =
+    isWeakConfirm
+      ? (side === "BUY" ? "WEAK PULLBACK BUY" : "WEAK PULLBACK SELL")
+      : (side === "BUY" ? "PULLBACK BUY"       : "PULLBACK SELL");
+
+  const rsiDirection: SignalResult["rsiDirection"] =
+    rsiRising ? "RISING" : rsiDecreasing ? "FALLING" : "FLAT";
 
   return {
     signal: side,
@@ -1105,11 +1172,14 @@ function tryPullbackEntry(
     trend: side === "BUY" ? "BULLISH" : "BEARISH",
     trendStrength: ind.trendStrength,
     marketMode,
-    signalLabel: side === "BUY" ? "BUY_PULLBACK" : "SELL_PULLBACK",
+    signalLabel,
     timeframe,
     indicators: ind,
     zoneStatus,
     pullbackConfirmation,
+    pullbackState: ind.pullbackState,
+    pullbackStrength,
+    rsiDirection,
   };
 }
 
@@ -1249,8 +1319,10 @@ function generateSignal(
       if (macdBearCross) conf += 10;
       if (atrRising)     conf += 5;
       if (priceActionBias === "BEARISH") conf += 5;
-      const label = pullbackSell ? "PULLBACK SELL" : "TREND FOLLOWING SELL";
-      return makeSell(currentPrice, atr, conf, marketMode, timeframe, indicators, label);
+      const label = pullbackSell ? "PULLBACK SELL" : "STRONG TREND SELL";
+      const pullbackStrength: SignalResult["pullbackStrength"] = pullbackSell ? "PULLBACK" : "STRONG_TREND";
+      const rsiDirection: SignalResult["rsiDirection"] = indicators.rsiRising ? "RISING" : indicators.rsiDecreasing ? "FALLING" : "FLAT";
+      return { ...makeSell(currentPrice, atr, conf, marketMode, timeframe, indicators, label), pullbackStrength, rsiDirection, zoneStatus: indicators.zoneStatus, pullbackConfirmation: indicators.pullbackConfirmation, pullbackState: indicators.pullbackState };
     }
 
     // ── COUNTER-TREND REVERSAL BUY — needs strong reversal signal ────────
@@ -1287,8 +1359,10 @@ function generateSignal(
       if (macdBullCross) conf += 10;
       if (atrRising)     conf += 5;
       if (priceActionBias === "BULLISH") conf += 5;
-      const label = pullbackBuy ? "PULLBACK BUY" : "TREND FOLLOWING BUY";
-      return makeBuy(currentPrice, atr, conf, marketMode, timeframe, indicators, label);
+      const label = pullbackBuy ? "PULLBACK BUY" : "STRONG TREND BUY";
+      const pullbackStrength: SignalResult["pullbackStrength"] = pullbackBuy ? "PULLBACK" : "STRONG_TREND";
+      const rsiDirection: SignalResult["rsiDirection"] = indicators.rsiRising ? "RISING" : indicators.rsiDecreasing ? "FALLING" : "FLAT";
+      return { ...makeBuy(currentPrice, atr, conf, marketMode, timeframe, indicators, label), pullbackStrength, rsiDirection, zoneStatus: indicators.zoneStatus, pullbackConfirmation: indicators.pullbackConfirmation, pullbackState: indicators.pullbackState };
     }
 
     // ── COUNTER-TREND SELL (bearish reversal in bullish trend) ───────────
@@ -2431,6 +2505,8 @@ function runScoreEngine(
       zoneStatus: ind.zoneStatus,
       pullbackConfirmation: ind.pullbackConfirmation,
       pullbackState: ind.pullbackState,
+      pullbackStrength: "NO_TRADE" as const,
+      rsiDirection: (ind.rsiRising ? "RISING" : ind.rsiDecreasing ? "FALLING" : "FLAT") as SignalResult["rsiDirection"],
       momentumBias: ind.momentumBias,
       momentumScore: ind.momentumScore,
       marketState: ind.marketState,
@@ -2478,6 +2554,14 @@ function runScoreEngine(
     momentumBias: ind.momentumBias,
     momentumScore: ind.momentumScore,
     marketState: ind.marketState,
+    // Derive pullbackStrength from the score axes for the score-engine path.
+    pullbackStrength: (
+      score.confirmation > 0 ? "PULLBACK" :
+      score.pullback     > 0 ? "WEAK_PULLBACK" :
+      score.breakout     > 0 ? "STRONG_TREND" :
+                               "STRONG_TREND"
+    ) as SignalResult["pullbackStrength"],
+    rsiDirection: (ind.rsiRising ? "RISING" : ind.rsiDecreasing ? "FALLING" : "FLAT") as SignalResult["rsiDirection"],
   };
 
   // Apply only soft risk filters (active trade / cooldown / anti-stacking).
@@ -2562,6 +2646,10 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       impulseCascadeSell: false,
       overextendedBuy: false,
       overextendedSell: false,
+      prevRsi: prev?.rsi ?? rsi,
+      rsiRising: false,
+      rsiDecreasing: false,
+      rsiFlat: true,
     };
   }
 

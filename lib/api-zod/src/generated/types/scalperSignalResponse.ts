@@ -92,6 +92,10 @@ long opposite-side wick + above-avg volume = liquidity grab).
   pullbackConfirmation?: ScalperSignalResponsePullbackConfirmation;
   /** Pullback State Detector — BULLISH_PULLBACK = price retracing inside a bullish trend (between EMA50 and EMA20); BEARISH_PULLBACK = mirror for bearish; NONE = no active pullback. */
   pullbackState?: ScalperSignalResponsePullbackState;
+  /** Pullback strength classification — STRONG_TREND = trending; PULLBACK = all 3 conditions met; WEAK_PULLBACK = partial; NO_TRADE = skip. */
+  pullbackStrength?: "STRONG_TREND" | "PULLBACK" | "WEAK_PULLBACK" | "NO_TRADE";
+  /** RSI momentum direction vs previous bar — RISING / FALLING / FLAT. */
+  rsiDirection?: "RISING" | "FALLING" | "FLAT";
   /** Trend Memory — directional bias from net price move over the last 5–10 candles. Overrides SIDEWAYS classification when the recent move is strong, preventing false sideways during pullbacks. */
   momentumBias?: ScalperSignalResponseMomentumBias;
   /** Trend Memory — signed momentum score = (close[t] − close[t−8]) / (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias. */

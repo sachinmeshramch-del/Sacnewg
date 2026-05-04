@@ -334,16 +334,21 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
-              {/* Pullback Entry Engine — fired signal banner */}
-              {(data.signalLabel === "BUY_PULLBACK" || data.signalLabel === "SELL_PULLBACK") && (
+              {/* Pullback confirmed signal banner — fires on PULLBACK BUY / SELL or WEAK PULLBACK */}
+              {(data.pullbackStrength === "PULLBACK" || data.pullbackStrength === "WEAK_PULLBACK") &&
+               (data.signal === "BUY" || data.signal === "SELL") && (
                 <div className={cn(
                   "mt-3 px-3 py-1.5 rounded-md border-2 text-[11px] font-black tracking-widest uppercase inline-flex items-center gap-1.5",
-                  data.signalLabel === "BUY_PULLBACK"
+                  data.pullbackStrength === "PULLBACK" && data.signal === "BUY"
                     ? "border-success/60 bg-success/10 text-success shadow-[0_0_18px_rgba(22,163,74,0.25)]"
-                    : "border-destructive/60 bg-destructive/10 text-destructive shadow-[0_0_18px_rgba(225,29,72,0.25)]"
+                  : data.pullbackStrength === "PULLBACK" && data.signal === "SELL"
+                    ? "border-destructive/60 bg-destructive/10 text-destructive shadow-[0_0_18px_rgba(225,29,72,0.25)]"
+                  : "border-warning/60 bg-warning/10 text-warning"
                 )}>
                   <span className="text-base leading-none">🎯</span>
-                  {data.signalLabel === "BUY_PULLBACK" ? "BUY PULLBACK CONFIRMED" : "SELL PULLBACK CONFIRMED"}
+                  {data.pullbackStrength === "PULLBACK"
+                    ? (data.signal === "BUY" ? "PULLBACK BUY CONFIRMED" : "PULLBACK SELL CONFIRMED")
+                    : (data.signal === "BUY" ? "WEAK PULLBACK BUY"      : "WEAK PULLBACK SELL")}
                 </div>
               )}
 
@@ -363,35 +368,30 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
-              {/* Pullback Entry Engine — zone + rejection live status.
-                  Coloured BUY ZONE / SELL ZONE labels only appear when the
-                  setup is actually tradable. Otherwise we show neutral
-                  "Candidate buy/sell area" so the panel doesn't urge action
-                  on a non-qualified zone. */}
+              {/* Pullback Analysis Panel — always visible when zone/confirmation data exists */}
               {(data.zoneStatus || data.pullbackConfirmation) && (
-                <div className="mt-3 w-full max-w-[260px] mx-auto rounded-md border border-border/40 bg-card/40 px-3 py-2 text-[10px] tracking-wide space-y-1">
-                  {(() => {
-                    const qualified = data.permission === "QUALIFIED" || data.permission === "ACTIONABLE";
-                    const zone = data.zoneStatus;
-                    const label = qualified
-                      ? (zone === "BUY_ZONE"  ? "BUY ZONE"
-                       : zone === "SELL_ZONE" ? "SELL ZONE"
-                       :                        "NO ZONE")
-                      : (zone === "BUY_ZONE"  ? "Candidate buy area"
-                       : zone === "SELL_ZONE" ? "Candidate sell area"
-                       :                        "No zone");
-                    const colour = qualified
-                      ? (zone === "BUY_ZONE"  ? "text-success"
-                       : zone === "SELL_ZONE" ? "text-destructive"
-                       :                        "text-muted-foreground")
-                      : "text-muted-foreground";
-                    return (
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">Pullback Zone</span>
-                        <span className={cn("font-bold tracking-widest", colour)}>{label}</span>
-                      </div>
-                    );
-                  })()}
+                <div className="mt-3 w-full max-w-[260px] mx-auto rounded-md border border-border/40 bg-card/40 px-3 py-2 text-[10px] tracking-wide space-y-1.5">
+
+                  {/* Row 1: Pullback Zone YES / NO */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Pullback Zone</span>
+                    {data.zoneStatus && data.zoneStatus !== "NO_ZONE" ? (
+                      <span className={cn(
+                        "font-bold tracking-widest inline-flex items-center gap-1",
+                        data.zoneStatus === "BUY_ZONE" ? "text-success" : "text-destructive",
+                      )}>
+                        <span className={cn(
+                          "h-1.5 w-1.5 rounded-full animate-pulse",
+                          data.zoneStatus === "BUY_ZONE" ? "bg-success" : "bg-destructive",
+                        )} />
+                        YES — {data.zoneStatus === "BUY_ZONE" ? "BUY ZONE" : "SELL ZONE"}
+                      </span>
+                    ) : (
+                      <span className="font-bold tracking-widest text-muted-foreground">NO</span>
+                    )}
+                  </div>
+
+                  {/* Row 2: Confirmation WAITING / CONFIRMED */}
                   <div className="flex items-center justify-between pt-1 border-t border-border/30">
                     <span className="text-muted-foreground">Confirmation</span>
                     <span className={cn(
@@ -402,9 +402,41 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                         "h-1.5 w-1.5 rounded-full",
                         data.pullbackConfirmation === "REJECTION_DETECTED" ? "bg-success" : "bg-warning animate-pulse",
                       )} />
-                      {data.pullbackConfirmation === "REJECTION_DETECTED" ? "REJECTION" : "WAITING"}
+                      {data.pullbackConfirmation === "REJECTION_DETECTED" ? "CONFIRMED" : "WAITING"}
                     </span>
                   </div>
+
+                  {/* Row 3: RSI Direction RISING / FALLING / FLAT */}
+                  {data.rsiDirection && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">RSI Direction</span>
+                      <span className={cn(
+                        "font-bold tracking-widest inline-flex items-center gap-1",
+                        data.rsiDirection === "RISING"  ? "text-success" :
+                        data.rsiDirection === "FALLING" ? "text-destructive" : "text-muted-foreground",
+                      )}>
+                        {data.rsiDirection === "RISING"  ? "↑ RISING" :
+                         data.rsiDirection === "FALLING" ? "↓ FALLING" : "→ FLAT"}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row 4: Signal Class */}
+                  {data.pullbackStrength && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Signal Class</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px]",
+                        data.pullbackStrength === "STRONG_TREND"  ? "text-primary" :
+                        data.pullbackStrength === "PULLBACK"      ? "text-success" :
+                        data.pullbackStrength === "WEAK_PULLBACK" ? "text-warning" : "text-muted-foreground",
+                      )}>
+                        {data.pullbackStrength === "STRONG_TREND"  ? "STRONG TREND" :
+                         data.pullbackStrength === "PULLBACK"      ? "PULLBACK" :
+                         data.pullbackStrength === "WEAK_PULLBACK" ? "WEAK PULLBACK" : "NO TRADE"}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
