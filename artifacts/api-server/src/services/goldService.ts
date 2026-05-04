@@ -97,6 +97,12 @@ interface SignalResult {
   entryQuality?: "EARLY" | "CONFIRMED";
   marketState?: "TRENDING" | "EXHAUSTED" | "REVERSAL_WATCH";
   blockReason?: string;
+  // Multi-trade engine (NEW). entryType classifies the entry within the
+  // current trend; executionStatus shows whether the trade was taken.
+  entryType?: "FIRST_ENTRY" | "ADD_ON" | "REVERSAL";
+  executionStatus?: "EXECUTED" | "SKIPPED" | "LIMITED";
+  multiTradeStatus?: string;   // human-readable mode banner for the UI
+  activeTradeCount?: number;   // how many slots are currently open
   // Indicator Conflict Engine (NEW) — surfaces WHY a setup isn't tradable.
   conflictLevel?: "NONE" | "MINOR" | "MIXED" | "SEVERE";
   conflictReasons?: string[];
@@ -211,33 +217,71 @@ interface ActiveTrade {
   confidence: number;
 }
 
-const activeTrade: Record<string, ActiveTrade | null> = {
-  "1m": null,
-  "5m": null,
+// ── Multi-trade engine — replaces the single-slot activeTrade system ─────────
+// Holds up to MAX_ACTIVE_TRADES open positions per timeframe. Positions are
+// auto-evicted when TP/SL is hit or after ACTIVE_TRADE_TIMEOUT_MS.
+const activeTrades: Record<string, ActiveTrade[]> = {
+  "1m": [],
+  "5m": [],
 };
 
-/** Resolves an open trade if TP/SL hit or 10-min timeout exceeded. */
+/** Remove trades that hit TP/SL or timed out. Called before every gate check. */
+function purgeExpiredTrades(tf: string, currentPrice: number): void {
+  const trades = activeTrades[tf];
+  if (!trades || trades.length === 0) return;
+  activeTrades[tf] = trades.filter(t => {
+    if (Date.now() - t.timestamp > ACTIVE_TRADE_TIMEOUT_MS) return false;
+    if (t.signal === "BUY") {
+      if (currentPrice >= t.takeProfit || currentPrice <= t.stopLoss) return false;
+    } else {
+      if (currentPrice <= t.takeProfit || currentPrice >= t.stopLoss) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Legacy helper — returns the most-recently opened active trade (or null).
+ * Kept so cooldown / anti-stacking logic still has a reference point.
+ */
 function checkActiveTrade(tf: string, currentPrice: number): ActiveTrade | null {
-  const t = activeTrade[tf];
-  if (!t) return null;
-  // Auto-clear on timeout
-  if (Date.now() - t.timestamp > ACTIVE_TRADE_TIMEOUT_MS) {
-    activeTrade[tf] = null;
-    return null;
+  purgeExpiredTrades(tf, currentPrice);
+  const trades = activeTrades[tf];
+  return trades && trades.length > 0 ? trades[trades.length - 1] : null;
+}
+
+/** Decide whether a new entry is allowed under the multi-trade rules. */
+type TradeDecision = { status: "ALLOW" | "LIMIT_REACHED" | "SKIP_DUPLICATE" };
+function canTakeTrade(
+  signal: "BUY" | "SELL",
+  currentPrice: number,
+  atr: number,
+  tf: string,
+): TradeDecision {
+  const trades = activeTrades[tf] ?? [];
+  if (trades.length >= MAX_ACTIVE_TRADES) return { status: "LIMIT_REACHED" };
+  const minDist = atr * MIN_ENTRY_DISTANCE_ATR;
+  const sameDirTrades = trades.filter(t => t.signal === signal);
+  if (sameDirTrades.length > 0) {
+    const last = sameDirTrades[sameDirTrades.length - 1];
+    if (Math.abs(currentPrice - last.entry) < minDist) return { status: "SKIP_DUPLICATE" };
   }
-  // Auto-clear on TP / SL hit
-  if (t.signal === "BUY") {
-    if (currentPrice >= t.takeProfit || currentPrice <= t.stopLoss) {
-      activeTrade[tf] = null;
-      return null;
-    }
-  } else {
-    if (currentPrice <= t.takeProfit || currentPrice >= t.stopLoss) {
-      activeTrade[tf] = null;
-      return null;
-    }
-  }
-  return t;
+  return { status: "ALLOW" };
+}
+
+/** Classify this entry as the first, a continuation add-on, or a reversal. */
+function getEntryType(
+  signal: "BUY" | "SELL",
+  tf: string,
+  isReversalSignal: boolean,
+): "FIRST_ENTRY" | "ADD_ON" | "REVERSAL" {
+  if (isReversalSignal) return "REVERSAL";
+  const trades = activeTrades[tf] ?? [];
+  const lastMem = lastSignalMemory[tf];
+  if (trades.length === 0 && !lastMem) return "FIRST_ENTRY";
+  if (lastMem && lastMem.signal !== signal) return "REVERSAL";
+  if (trades.length > 0) return "ADD_ON";
+  return "FIRST_ENTRY";
 }
 
 interface PrevState {
@@ -492,6 +536,9 @@ const EXHAUSTION_WICK_TO_BODY    = 1.5;  // wick ≥ 1.5*body = "long wick"
 const REVERSAL_IMPULSE_BODY_PCT  = 0.0008; // body > 0.08% = "strong impulse"
 const PULLBACK_ATR_MULT          = 0.6;  // entry must be within 0.6*ATR of EMA20
 const ACTIVE_TRADE_TIMEOUT_MS    = 10 * 60 * 1000; // 10-min auto-clear
+// ── Multi-trade engine constants ─────────────────────────────────────────────
+const MAX_ACTIVE_TRADES          = 3;    // max simultaneous open positions per TF
+const MIN_ENTRY_DISTANCE_ATR     = 0.5;  // min ATR distance between stacked entries
 
 function detectTrap(
   open: number, high: number, low: number, close: number,
@@ -2236,14 +2283,45 @@ function applySoftRiskFilters(
   // blocker with the stronger setup. This way a fresh STRONG signal is
   // never silenced by a stale lower-conviction one.
 
-  // Active trade in this TF — convert to HOLD unless the new signal is
-  // higher conviction than the one that opened the active trade.
-  const active = checkActiveTrade(tfKey, currentPrice);
-  if (active && result.confidence <= active.confidence) {
+  // ── Multi-trade gate (replaces single active-trade block) ───────────────
+  // Signals are ALWAYS surfaced as BUY/SELL — never silently converted to
+  // HOLD here. executionStatus tells the UI whether the trade was taken.
+  if (result.signal === "BUY" || result.signal === "SELL") {
+    purgeExpiredTrades(tfKey, currentPrice);
+    const atrForGate  = Math.max(result.indicators.atr, 1e-6);
+    const isReversal  = result.signalType === "REVERSAL";
+    // Reversal signals always get an ALLOW — they flip the position.
+    const decision    = isReversal
+      ? { status: "ALLOW" as const }
+      : canTakeTrade(result.signal, currentPrice, atrForGate, tfKey);
+    const entryTyp    = getEntryType(result.signal, tfKey, isReversal);
+    const activeCount = (activeTrades[tfKey] ?? []).length;
+
+    if (decision.status === "LIMIT_REACHED") {
+      return {
+        ...result,
+        entryType:        entryTyp,
+        executionStatus:  "LIMITED",
+        multiTradeStatus: `LIMIT REACHED (MAX ${MAX_ACTIVE_TRADES} TRADES)`,
+        activeTradeCount: activeCount,
+      };
+    }
+    if (decision.status === "SKIP_DUPLICATE") {
+      return {
+        ...result,
+        entryType:        entryTyp,
+        executionStatus:  "SKIPPED",
+        multiTradeStatus: "SKIP DUPLICATE ENTRY",
+        activeTradeCount: activeCount,
+      };
+    }
+    // ALLOW — trade will be recorded by getSignal after confirmation
     return {
       ...result,
-      signal: "HOLD",
-      blockReason: `Active ${active.signal} trade in flight`,
+      entryType:        entryTyp,
+      executionStatus:  "EXECUTED",
+      multiTradeStatus: activeCount > 0 ? "STACKING ENTRIES ENABLED" : undefined,
+      activeTradeCount: activeCount,
     };
   }
 
@@ -2480,6 +2558,10 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       volumeSpike: false,
       strongBreakoutBuy: false,
       strongBreakoutSell: false,
+      impulseCascadeBuy: false,
+      impulseCascadeSell: false,
+      overextendedBuy: false,
+      overextendedSell: false,
     };
   }
 
@@ -2558,13 +2640,15 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
   const safeTP2        = stripped ? undefined : filteredResult.tp2;
   const safeZoneStatus = stripped ? "NO_ZONE" : (filteredResult.zoneStatus ?? indicators.zoneStatus);
 
-  // Record a confirmed signal — starts the 3-min cooldown AND opens the
-  // single active trade slot. Now ALSO requires permission ≥ QUALIFIED so
-  // mixed / blocked setups never enter the active-trade slot.
+  // Record a confirmed, EXECUTED signal — starts the 3-min cooldown AND
+  // pushes a new slot onto the multi-trade array (up to MAX_ACTIVE_TRADES).
+  // SKIPPED / LIMITED signals are shown in the UI but do NOT open a slot.
   if (
     decisionSignal !== "HOLD" && decisionSignal !== "SETUP" && decisionSignal !== "CONFLICT" &&
     filteredResult.signalStatus === "CONFIRMED" &&
-    (permission === "QUALIFIED" || permission === "ACTIONABLE")
+    (permission === "QUALIFIED" || permission === "ACTIONABLE") &&
+    filteredResult.executionStatus !== "SKIPPED" &&
+    filteredResult.executionStatus !== "LIMITED"
   ) {
     lastSignalMemory[tfKey] = {
       signal: decisionSignal as "BUY" | "SELL",
@@ -2572,14 +2656,19 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       timestamp: Date.now(),
       confidence: filteredResult.confidence,
     };
-    activeTrade[tfKey] = {
-      signal: decisionSignal as "BUY" | "SELL",
-      entry: filteredResult.entry,
-      stopLoss: filteredResult.stopLoss,
-      takeProfit: filteredResult.takeProfit,
-      timestamp: Date.now(),
-      confidence: filteredResult.confidence,
-    };
+    if (!activeTrades[tfKey]) activeTrades[tfKey] = [];
+    // Cap defensively — should already be enforced by canTakeTrade, but
+    // belt-and-suspenders to avoid unbounded growth.
+    if (activeTrades[tfKey].length < MAX_ACTIVE_TRADES) {
+      activeTrades[tfKey].push({
+        signal: decisionSignal as "BUY" | "SELL",
+        entry: filteredResult.entry,
+        stopLoss: filteredResult.stopLoss,
+        takeProfit: filteredResult.takeProfit,
+        timestamp: Date.now(),
+        confidence: filteredResult.confidence,
+      });
+    }
   }
 
   const result: SignalResult = {

@@ -310,8 +310,25 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
-              {/* Block reason — surfaces WHY a trade idea was suppressed */}
-              {data.blockReason && (
+              {/* Multi-trade status banner — replaces old "BLOCKED" messaging */}
+              {data.multiTradeStatus && (
+                <div className={cn(
+                  "mt-2 px-3 py-1.5 rounded-md border text-[10px] font-black tracking-widest uppercase max-w-[300px] text-center",
+                  data.executionStatus === "LIMITED"
+                    ? "border-amber-400/50 bg-amber-400/10 text-amber-200"
+                    : data.executionStatus === "SKIPPED"
+                      ? "border-warning/40 bg-warning/10 text-warning"
+                      : "border-primary/30 bg-primary/10 text-primary",
+                )}>
+                  {data.multiTradeStatus}
+                  {typeof data.activeTradeCount === "number" && data.activeTradeCount > 0 && (
+                    <span className="ml-1.5 opacity-70">({data.activeTradeCount}/{3})</span>
+                  )}
+                </div>
+              )}
+
+              {/* Block reason — surfaces WHY a trade idea was suppressed (non-multi-trade) */}
+              {data.blockReason && !data.multiTradeStatus && (
                 <div className="mt-2 px-3 py-1.5 rounded-md border border-destructive/30 bg-destructive/10 text-destructive text-[10px] font-semibold tracking-wide uppercase max-w-[260px] text-center">
                   Blocked: {data.blockReason}
                 </div>
@@ -491,6 +508,28 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                         : "text-warning border-warning/30 bg-warning/10"
                     )}>
                       {data.signalType === "TREND" ? "TREND TRADE" : "REVERSAL TRADE"}
+                    </span>
+                  )}
+                  {data.entryType && (
+                    <span className={cn(
+                      "px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest border",
+                      data.entryType === "FIRST_ENTRY"  && "text-success border-success/30 bg-success/10",
+                      data.entryType === "ADD_ON"        && "text-primary border-primary/30 bg-primary/10",
+                      data.entryType === "REVERSAL"      && "text-amber-300 border-amber-400/30 bg-amber-400/10",
+                    )}>
+                      {data.entryType === "FIRST_ENTRY" ? "FIRST ENTRY"
+                        : data.entryType === "ADD_ON"   ? "ADD-ON"
+                        : "REVERSAL"}
+                    </span>
+                  )}
+                  {data.executionStatus && data.executionStatus !== "EXECUTED" && (
+                    <span className={cn(
+                      "px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest border",
+                      data.executionStatus === "LIMITED"
+                        ? "text-amber-300 border-amber-400/30 bg-amber-400/10"
+                        : "text-muted-foreground border-border/40 bg-card/40",
+                    )}>
+                      {data.executionStatus === "LIMITED" ? "NOT EXECUTED" : "SKIPPED"}
                     </span>
                   )}
                 </div>
