@@ -337,6 +337,23 @@ export const ScalperSignalResponseMomentumBias = {
   NEUTRAL: "NEUTRAL",
 } as const;
 
+/**
+ * Momentum Alignment + Auto Delay Entry gate.
+ * CONFIRMED = RSI aligned + strong candle.
+ * DELAYED   = RSI flat/neutral — waiting for alignment.
+ * BLOCKED   = RSI actively opposes trade direction.
+ * WAITING   = confidence < 60 or confirmation not yet met.
+ */
+export type ScalperSignalResponseMomentumAlignmentStatus =
+  (typeof ScalperSignalResponseMomentumAlignmentStatus)[keyof typeof ScalperSignalResponseMomentumAlignmentStatus];
+
+export const ScalperSignalResponseMomentumAlignmentStatus = {
+  CONFIRMED: "CONFIRMED",
+  DELAYED:   "DELAYED",
+  BLOCKED:   "BLOCKED",
+  WAITING:   "WAITING",
+} as const;
+
 export interface ScalperSignalResponse {
   /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming; CONFLICT = indicators disagree or chop detected, do not trade. */
   signal: ScalperSignalResponseSignal;
@@ -406,6 +423,12 @@ long opposite-side wick + above-avg volume = liquidity grab).
   momentumBias?: ScalperSignalResponseMomentumBias;
   /** Trend Memory — signed momentum score = (close[t] − close[t−8]) / (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias. */
   momentumScore?: number;
+  /** Momentum Alignment + Auto Delay Entry gate. CONFIRMED = RSI aligned + strong candle. DELAYED = waiting for RSI to align. BLOCKED = RSI opposes direction. WAITING = low confidence or unconfirmed. */
+  momentumAlignmentStatus?: ScalperSignalResponseMomentumAlignmentStatus;
+  /** Machine-readable reason for the current momentumAlignmentStatus (e.g. RSI_NOT_ALIGNED, WEAK_CANDLE, ALL_CONDITIONS_MET). */
+  momentumAlignmentReason?: string;
+  /** True when RSI direction flips to align with the trade this bar: DOWN→UP for BUY, UP→DOWN for SELL. */
+  momentumShiftDetected?: boolean;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: string;

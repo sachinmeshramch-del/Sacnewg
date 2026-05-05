@@ -401,6 +401,21 @@ components:
         momentumScore:
           type: number
           description: Trend Memory — signed momentum score = (close[t] − close[t−8]) / (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias.
+        momentumAlignmentStatus:
+          type: string
+          enum: [CONFIRMED, DELAYED, BLOCKED, WAITING]
+          description: |
+            Momentum Alignment + Auto Delay Entry gate.
+            CONFIRMED = RSI aligned with trade direction + strong candle printed.
+            DELAYED   = RSI is flat/neutral — waiting for momentum to align.
+            BLOCKED   = RSI is actively opposing the trade direction.
+            WAITING   = confidence < 60 or 2-candle confirmation not yet met.
+        momentumAlignmentReason:
+          type: string
+          description: Machine-readable reason code for the current momentumAlignmentStatus (e.g. RSI_NOT_ALIGNED, WEAK_CANDLE, ALL_CONDITIONS_MET).
+        momentumShiftDetected:
+          type: boolean
+          description: "True when RSI direction flips to align with the trade this bar: DOWN→UP for BUY, UP→DOWN for SELL. Triggers the Momentum Shift Detected label."
         timeframe:
           type: string
         indicators:

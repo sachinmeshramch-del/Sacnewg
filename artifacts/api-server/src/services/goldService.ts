@@ -135,6 +135,15 @@ interface SignalResult {
   // Trend Memory — momentum bias from net price move over the last 5–10 candles.
   momentumBias?: "BULLISH" | "BEARISH" | "NEUTRAL";
   momentumScore?: number; // signed; |score| ≥ 0.6 = strong recent move
+  // ── Momentum Alignment + Auto Delay Entry (NEW) ──────────────────────────
+  // CONFIRMED  = RSI aligned + candle strength gate passed
+  // DELAYED    = RSI direction is flat/neutral — wait for alignment
+  // BLOCKED    = RSI actively opposes trade direction
+  // WAITING    = confidence < 60 or no confirmation yet
+  momentumAlignmentStatus?: "CONFIRMED" | "DELAYED" | "BLOCKED" | "WAITING";
+  momentumAlignmentReason?: string;
+  // true when RSI direction flips to align with the trade (DOWN→UP for BUY or UP→DOWN for SELL)
+  momentumShiftDetected?: boolean;
   timeframe: string;
   indicators: Indicators;
   timestamp: string;
@@ -306,6 +315,7 @@ interface PrevState {
   rsi: number;
   macdHistogram: number;
   atr: number;
+  rsiDir?: "UP" | "DOWN" | "FLAT";
 }
 
 const prevState: Record<string, PrevState | null> = {
@@ -2519,6 +2529,37 @@ function trackConfirmationPersistence(
   return pending.candleCount >= CONFIRMATION_CANDLES ? "CONFIRMED" : "PENDING";
 }
 
+// ── Momentum Alignment + Auto Delay Entry Helpers ─────────────────────────────
+// These functions form the RSI-direction filter gate that sits ON TOP of the
+// existing score engine. They never remove any existing fields — they only
+// attach additional metadata that the UI uses to show CONFIRMED / DELAYED /
+// BLOCKED / WAITING states and the "Momentum Shift Detected 🚀" label.
+
+function getMomentumRSIDir(ind: ExtendedIndicators): "UP" | "DOWN" | "FLAT" {
+  return ind.rsiRising ? "UP" : ind.rsiDecreasing ? "DOWN" : "FLAT";
+}
+
+function shouldEnterTrade(
+  signal: "BUY" | "SELL",
+  rsiDir: "UP" | "DOWN" | "FLAT",
+  isConfirmed: boolean,
+  confidence: number,
+  pullbackActive: boolean,
+  strongBullishCandle: boolean,
+  strongBearishCandle: boolean,
+): { status: "CONFIRMED" | "DELAYED" | "BLOCKED" | "WAITING"; reason: string } {
+  if (confidence < 60)  return { status: "WAITING", reason: "LOW_CONFIDENCE" };
+  if (!isConfirmed)     return { status: "WAITING", reason: "NO_CONFIRMATION" };
+  if (pullbackActive)   return { status: "WAITING", reason: "PULLBACK_ACTIVE" };
+  if (signal === "BUY"  && rsiDir === "DOWN") return { status: "BLOCKED",  reason: "RSI_OPPOSING" };
+  if (signal === "SELL" && rsiDir === "UP")   return { status: "BLOCKED",  reason: "RSI_OPPOSING" };
+  if (signal === "BUY"  && rsiDir !== "UP")   return { status: "DELAYED",  reason: "RSI_NOT_ALIGNED" };
+  if (signal === "SELL" && rsiDir !== "DOWN") return { status: "DELAYED",  reason: "RSI_NOT_ALIGNED" };
+  if (signal === "BUY"  && !strongBullishCandle) return { status: "DELAYED", reason: "WEAK_CANDLE" };
+  if (signal === "SELL" && !strongBearishCandle) return { status: "DELAYED", reason: "WEAK_CANDLE" };
+  return { status: "CONFIRMED", reason: "ALL_CONDITIONS_MET" };
+}
+
 // ── New main pipeline — replaces generateSignal + applyMtfConfirmation +
 //    applyFilters. Returns Omit<SignalResult, "timestamp">. Trap detections
 //    are still respected (high-quality reversal entries) but they go through
@@ -2825,11 +2866,12 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     };
   }
 
-  // Update prev state
+  // Update prev state (including RSI direction for momentum-shift detection)
   prevState[tfKey] = {
     rsi: indicators.rsi,
     macdHistogram: indicators.macdHistogram,
     atr: indicators.atr,
+    rsiDir: getMomentumRSIDir(indicators),
   };
 
   // Latest candle timestamp drives the 2-candle confirmation logic.
@@ -2931,6 +2973,43 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     }
   }
 
+  // ── Momentum Alignment + Auto Delay Entry ────────────────────────────────
+  // Layered AFTER the score engine — never modifies existing fields.
+  // Computes RSI direction filter, candle strength gate, and shift detection.
+  let momentumAlignmentStatus: SignalResult["momentumAlignmentStatus"];
+  let momentumAlignmentReason: string | undefined;
+  let momentumShiftDetected: boolean | undefined;
+
+  if (decisionSignal === "BUY" || decisionSignal === "SELL") {
+    const currentRsiDir = getMomentumRSIDir(indicators);
+    const prevRsiDir    = prev?.rsiDir;
+
+    // Detect shift: RSI flipped FROM non-aligned TO aligned direction this bar
+    if (prevRsiDir !== undefined && prevRsiDir !== currentRsiDir) {
+      if (decisionSignal === "BUY"  && currentRsiDir === "UP"   && prevRsiDir !== "UP")  momentumShiftDetected = true;
+      if (decisionSignal === "SELL" && currentRsiDir === "DOWN" && prevRsiDir !== "DOWN") momentumShiftDetected = true;
+    }
+
+    // Gate chain: confidence → confirmation → pullback → RSI direction → candle strength
+    const isConfirmed    = filteredResult.signalStatus === "CONFIRMED"
+                        || filteredResult.entryMode    === "CONFIRMED"
+                        || filteredResult.entryMode    === "AUTO";
+    const pullbackActive = indicators.pullbackState !== "NONE"
+                        && filteredResult.pullbackConfirmation !== "REJECTION_DETECTED";
+
+    const mom = shouldEnterTrade(
+      decisionSignal,
+      currentRsiDir,
+      isConfirmed,
+      filteredResult.confidence,
+      pullbackActive,
+      indicators.strongCandleBuy,
+      indicators.strongCandleSell,
+    );
+    momentumAlignmentStatus = mom.status;
+    momentumAlignmentReason = mom.reason;
+  }
+
   const result: SignalResult = {
     ...filteredResult,
     signal: decisionSignal,
@@ -2952,6 +3031,9 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     pullbackState: filteredResult.pullbackState ?? indicators.pullbackState,
     momentumBias:  filteredResult.momentumBias  ?? indicators.momentumBias,
     momentumScore: filteredResult.momentumScore ?? indicators.momentumScore,
+    momentumAlignmentStatus,
+    momentumAlignmentReason,
+    momentumShiftDetected,
     timestamp: new Date().toISOString(),
   };
 

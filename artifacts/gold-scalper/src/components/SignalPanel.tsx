@@ -288,6 +288,14 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </ul>
               )}
 
+              {/* Momentum Shift Detected — fires when RSI direction flips to align with the trade */}
+              {data.momentumShiftDetected && (data.signal === "BUY" || data.signal === "SELL") && (
+                <div className="mt-3 px-3 py-1.5 rounded-md border-2 border-emerald-400/60 bg-emerald-400/10 text-emerald-300 text-[11px] font-black tracking-widest uppercase flex items-center gap-1.5 shadow-[0_0_18px_rgba(52,211,153,0.25)] animate-pulse">
+                  <span className="text-base leading-none">🚀</span>
+                  MOMENTUM SHIFT DETECTED
+                </div>
+              )}
+
               {/* Trap / Stop-Hunt banner — highest priority alert */}
               {data.signal !== "HOLD" && data.signalLabel && (
                 data.signalLabel.includes("FAKE BREAKOUT") ||
@@ -480,6 +488,31 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                       )}>
                         {data.rsiDirection === "RISING"  ? "↑ RISING" :
                          data.rsiDirection === "FALLING" ? "↓ FALLING" : "→ FLAT"}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: Momentum Alignment — CONFIRMED / DELAYED / BLOCKED / WAITING */}
+                  {data.momentumAlignmentStatus && (data.signal === "BUY" || data.signal === "SELL") && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Momentum</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px] inline-flex items-center gap-1",
+                        data.momentumAlignmentStatus === "CONFIRMED" ? "text-success" :
+                        data.momentumAlignmentStatus === "BLOCKED"   ? "text-destructive" :
+                        data.momentumAlignmentStatus === "DELAYED"   ? "text-amber-300" :
+                        "text-warning",
+                      )}>
+                        <span className={cn(
+                          "h-1.5 w-1.5 rounded-full",
+                          data.momentumAlignmentStatus === "CONFIRMED" ? "bg-success" :
+                          data.momentumAlignmentStatus === "BLOCKED"   ? "bg-destructive" :
+                          "bg-amber-400 animate-pulse",
+                        )} />
+                        {data.momentumAlignmentStatus === "CONFIRMED" ? "✓ CONFIRMED" :
+                         data.momentumAlignmentStatus === "BLOCKED"   ? "✗ BLOCKED" :
+                         data.momentumAlignmentStatus === "DELAYED"   ? "⏳ WAITING FOR ALIGNMENT" :
+                         "⏳ WAITING"}
                       </span>
                     </div>
                   )}

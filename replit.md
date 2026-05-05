@@ -55,6 +55,7 @@ The project is organized as a pnpm workspace monorepo. It includes:
     - Incorporates **Trend Memory + Strict Sideways + Pullback States** for accurate trend classification.
     - Includes a **Decision Layer** (Regime, Conflict, Chop, Permission) to refine signals based on market context and indicator agreement.
     - Utilizes a **Score-Based Decision Engine** where various checks contribute weighted votes to determine signal strength and confidence, replacing hard-blocking conditions.
+    - Features a **Momentum Alignment + Auto Delay Entry** system layered on top of the score engine: `shouldEnterTrade()` gate chain (confidence → confirmation → pullback → RSI direction → candle strength) produces `momentumAlignmentStatus` (CONFIRMED/DELAYED/BLOCKED/WAITING) and `momentumAlignmentReason` attached to every BUY/SELL signal. Detects "Momentum Shift" when RSI direction flips to align with the trade (DOWN→UP for BUY, UP→DOWN for SELL), triggering the 🚀 label in the UI.
 - **Gold Intraday AI Trader (`artifacts/gold-intraday`)**: A React + Vite web app for 1-4 hour intraday signals using EMA20/EMA50 and multi-timeframe analysis.
 - **Smart Gold AI Pro (`artifacts/smart-gold`)**: A React + Vite web app for Smart Money Concepts (SMC) based XAUUSD intraday trading, detecting BOS, CHoCH, Liquidity Grab, Order Blocks, and FVG.
 
