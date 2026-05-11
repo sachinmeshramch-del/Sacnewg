@@ -278,18 +278,15 @@ export function SignalHistory() {
       .filter((r: Record<string, unknown>) => r.strength !== "IGNORE");
   }, [data]);
 
-  // Dedup by id first, then sort by confidence DESC (highest first), with
-  // newest timestamp as the tiebreaker. Cap at MAX_PER_TABLE.
+  // Dedup by id first, then sort by timestamp DESC (newest first).
+  // Cap at MAX_PER_TABLE.
   const bucket = (kind: Exclude<Strength, "IGNORE">) =>
     Array.from(
       new Map(
         allRows.filter(r => r.strength === kind).map(r => [r.id, r]),
       ).values(),
     )
-      .sort((a, b) => {
-        if (b.confidence !== a.confidence) return b.confidence - a.confidence;
-        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-      })
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, MAX_PER_TABLE);
 
   const strongRows = useMemo(() => bucket("STRONG"), [allRows]);
