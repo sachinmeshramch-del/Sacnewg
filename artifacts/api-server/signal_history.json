@@ -1,65 +1,20 @@
 {
   "items": [
     {
-      "id": 186,
-      "signal": "BUY",
-      "confidence": 75,
-      "entry": 4579.7,
-      "stopLoss": 4572.44,
-      "takeProfit": 4595.68,
-      "trend": "BULLISH",
+      "id": 225,
+      "signal": "SELL",
+      "confidence": 80,
+      "entry": 4684.4,
+      "stopLoss": 4691.51,
+      "takeProfit": 4668.75,
+      "trend": "BEARISH",
       "timeframe": "5m",
-      "timestamp": "2026-05-05T14:55:19.395Z",
-      "outcome": "PENDING",
-      "permission": "ACTIONABLE",
-      "signalStatus": "CONFIRMED",
-      "signalType": "STRONG"
-    },
-    {
-      "id": 185,
-      "signal": "BUY",
-      "confidence": 85,
-      "entry": 4578.5,
-      "stopLoss": 4571.66,
-      "takeProfit": 4593.55,
-      "trend": "BULLISH",
-      "timeframe": "5m",
-      "timestamp": "2026-05-05T14:54:53.355Z",
+      "timestamp": "2026-05-11T02:21:51.280Z",
       "outcome": "PENDING",
       "permission": "QUALIFIED",
-      "signalStatus": "PENDING",
-      "signalType": "STRONG"
-    },
-    {
-      "id": 184,
-      "signal": "BUY",
-      "confidence": 65,
-      "entry": 4583,
-      "stopLoss": 4575.7,
-      "takeProfit": 4599.06,
-      "trend": "BULLISH",
-      "timeframe": "5m",
-      "timestamp": "2026-05-05T14:43:04.988Z",
-      "outcome": "PENDING",
-      "permission": "ACTIONABLE",
-      "signalStatus": "CONFIRMED",
-      "signalType": "STRONG"
-    },
-    {
-      "id": 183,
-      "signal": "BUY",
-      "confidence": 65,
-      "entry": 4581.6,
-      "stopLoss": 4574.51,
-      "takeProfit": 4597.2,
-      "trend": "BULLISH",
-      "timeframe": "5m",
-      "timestamp": "2026-05-05T14:36:41.888Z",
-      "outcome": "PENDING",
-      "permission": "ACTIONABLE",
       "signalStatus": "CONFIRMED",
       "signalType": "STRONG"
     }
   ],
-  "counter": 187
+  "counter": 226
 }
