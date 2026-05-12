@@ -7,23 +7,28 @@
  */
 import type { ScalperIndicators } from "./scalperIndicators";
 import type { ScalperSignalResponseConflictLevel } from "./scalperSignalResponseConflictLevel";
+import type { ScalperSignalResponseDebugInfo } from "./scalperSignalResponseDebugInfo";
 import type { ScalperSignalResponseEntryQuality } from "./scalperSignalResponseEntryQuality";
 import type { ScalperSignalResponseHigherTrend } from "./scalperSignalResponseHigherTrend";
 import type { ScalperSignalResponseIndicatorBias } from "./scalperSignalResponseIndicatorBias";
 import type { ScalperSignalResponseMarketMode } from "./scalperSignalResponseMarketMode";
 import type { ScalperSignalResponseMarketRegime } from "./scalperSignalResponseMarketRegime";
 import type { ScalperSignalResponseMarketState } from "./scalperSignalResponseMarketState";
+import type { ScalperSignalResponseMomentumAlignmentStatus } from "./scalperSignalResponseMomentumAlignmentStatus";
 import type { ScalperSignalResponseMomentumBias } from "./scalperSignalResponseMomentumBias";
 import type { ScalperSignalResponseMtfStatus } from "./scalperSignalResponseMtfStatus";
 import type { ScalperSignalResponsePermission } from "./scalperSignalResponsePermission";
 import type { ScalperSignalResponsePullbackConfirmation } from "./scalperSignalResponsePullbackConfirmation";
 import type { ScalperSignalResponsePullbackState } from "./scalperSignalResponsePullbackState";
+import type { ScalperSignalResponseReversalRisk } from "./scalperSignalResponseReversalRisk";
 import type { ScalperSignalResponseScoreBreakdown } from "./scalperSignalResponseScoreBreakdown";
 import type { ScalperSignalResponseSignal } from "./scalperSignalResponseSignal";
+import type { ScalperSignalResponseSignalGrade } from "./scalperSignalResponseSignalGrade";
 import type { ScalperSignalResponseSignalStatus } from "./scalperSignalResponseSignalStatus";
 import type { ScalperSignalResponseSignalStrength } from "./scalperSignalResponseSignalStrength";
 import type { ScalperSignalResponseSignalType } from "./scalperSignalResponseSignalType";
 import type { ScalperSignalResponseTrend } from "./scalperSignalResponseTrend";
+import type { ScalperSignalResponseTrendState } from "./scalperSignalResponseTrendState";
 import type { ScalperSignalResponseTrendStrength } from "./scalperSignalResponseTrendStrength";
 import type { ScalperSignalResponseZoneStatus } from "./scalperSignalResponseZoneStatus";
 
@@ -92,18 +97,55 @@ long opposite-side wick + above-avg volume = liquidity grab).
   pullbackConfirmation?: ScalperSignalResponsePullbackConfirmation;
   /** Pullback State Detector — BULLISH_PULLBACK = price retracing inside a bullish trend (between EMA50 and EMA20); BEARISH_PULLBACK = mirror for bearish; NONE = no active pullback. */
   pullbackState?: ScalperSignalResponsePullbackState;
-  /** Pullback strength classification — STRONG_TREND = trending; PULLBACK = all 3 conditions met; WEAK_PULLBACK = partial; NO_TRADE = skip. */
-  pullbackStrength?: "STRONG_TREND" | "PULLBACK" | "WEAK_PULLBACK" | "NO_TRADE";
-  /** RSI momentum direction vs previous bar — RISING / FALLING / FLAT. */
-  rsiDirection?: "RISING" | "FALLING" | "FLAT";
-  /** Entry mode — AUTO = momentum candle triggered; CONFIRMED = pullback fully confirmed; WAITING = accumulating confirmation. */
-  entryMode?: "AUTO" | "CONFIRMED" | "WAITING";
-  /** High-level category driving the main label — MOMENTUM / PULLBACK / TREND / REVERSAL. */
-  signalCategory?: "MOMENTUM" | "PULLBACK" | "TREND" | "REVERSAL";
   /** Trend Memory — directional bias from net price move over the last 5–10 candles. Overrides SIDEWAYS classification when the recent move is strong, preventing false sideways during pullbacks. */
   momentumBias?: ScalperSignalResponseMomentumBias;
   /** Trend Memory — signed momentum score = (close[t] − close[t−8]) / (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias. */
   momentumScore?: number;
+  /** Momentum Alignment + Auto Delay Entry gate.
+CONFIRMED = RSI aligned with trade direction + strong candle printed.
+DELAYED   = RSI is flat/neutral — waiting for momentum to align.
+BLOCKED   = RSI is actively opposing the trade direction.
+WAITING   = confidence < 60 or 2-candle confirmation not yet met.
+ */
+  momentumAlignmentStatus?: ScalperSignalResponseMomentumAlignmentStatus;
+  /** Machine-readable reason code for the current momentumAlignmentStatus (e.g. RSI_NOT_ALIGNED, WEAK_CANDLE, ALL_CONDITIONS_MET). */
+  momentumAlignmentReason?: string;
+  /** True when RSI direction flips to align with the trade this bar: DOWN→UP for BUY, UP→DOWN for SELL. Triggers the Momentum Shift Detected label. */
+  momentumShiftDetected?: boolean;
+  /** Advanced signal quality grade from the Momentum Reversal Engine.
+A+ = optimal setup (score≥7, strong trend, no divergence, reversal risk LOW).
+A = good setup with minor limitations.
+B = tradable but caution warranted (MACD fading or moderate risk).
+C = risky setup (reversal signals active, choppy).
+D = avoid (HIGH reversal risk, score<2, or severe conflict).
+ */
+  signalGrade?: ScalperSignalResponseSignalGrade;
+  /** Advanced 7-state trend classification from the Momentum Reversal Engine.
+TRENDING_STRONG = confirmed strong trend, all systems go.
+TRENDING_WEAK = directional but lacking strength.
+REVERSAL_STARTING = ≥2 reversal signals active (divergence + displacement + exhaustion).
+CHOPPY = chop score >0.6, avoid trading.
+EXHAUSTED_TREND = exhaustion candles or MACD decay with divergence.
+BREAKOUT_BUILDUP = range compression before breakout.
+LIQUIDITY_TRAP = fake breakout/stop hunt pattern detected.
+ */
+  trendState?: ScalperSignalResponseTrendState;
+  /** Reversal protection risk rating.
+HIGH = 3+ factors active (RSI divergence + MACD decay + displacement + structure break).
+MEDIUM = 1-2 reversal factors active.
+LOW = clean setup, no reversal signals.
+ */
+  reversalRisk?: ScalperSignalResponseReversalRisk;
+  /** Active warning badges from the advanced engine, e.g.
+MOMENTUM REVERSING, MACD WEAKENING, STRONG IMPULSE AGAINST, TREND EXHAUSTED,
+REVERSAL STARTING, LIQUIDITY TRAP, CHOPPY MARKET, REVERSAL RISK HIGH.
+ */
+  activeWarnings?: string[];
+  /** Advanced engine debug breakdown for developer inspection.
+Contains rsiDivergence, macdDecay, oppositeDisplacement, reversalFactors,
+gradeFactors, and confidenceAdj fields.
+ */
+  debugInfo?: ScalperSignalResponseDebugInfo;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: Date;

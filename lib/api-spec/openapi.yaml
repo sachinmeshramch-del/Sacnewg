@@ -416,6 +416,50 @@ components:
         momentumShiftDetected:
           type: boolean
           description: "True when RSI direction flips to align with the trade this bar: DOWN→UP for BUY, UP→DOWN for SELL. Triggers the Momentum Shift Detected label."
+        signalGrade:
+          type: string
+          enum: [A+, A, B, C, D]
+          description: |
+            Advanced signal quality grade from the Momentum Reversal Engine.
+            A+ = optimal setup (score≥7, strong trend, no divergence, reversal risk LOW).
+            A = good setup with minor limitations.
+            B = tradable but caution warranted (MACD fading or moderate risk).
+            C = risky setup (reversal signals active, choppy).
+            D = avoid (HIGH reversal risk, score<2, or severe conflict).
+        trendState:
+          type: string
+          enum: [TRENDING_STRONG, TRENDING_WEAK, REVERSAL_STARTING, CHOPPY, EXHAUSTED_TREND, BREAKOUT_BUILDUP, LIQUIDITY_TRAP]
+          description: |
+            Advanced 7-state trend classification from the Momentum Reversal Engine.
+            TRENDING_STRONG = confirmed strong trend, all systems go.
+            TRENDING_WEAK = directional but lacking strength.
+            REVERSAL_STARTING = ≥2 reversal signals active (divergence + displacement + exhaustion).
+            CHOPPY = chop score >0.6, avoid trading.
+            EXHAUSTED_TREND = exhaustion candles or MACD decay with divergence.
+            BREAKOUT_BUILDUP = range compression before breakout.
+            LIQUIDITY_TRAP = fake breakout/stop hunt pattern detected.
+        reversalRisk:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+          description: |
+            Reversal protection risk rating.
+            HIGH = 3+ factors active (RSI divergence + MACD decay + displacement + structure break).
+            MEDIUM = 1-2 reversal factors active.
+            LOW = clean setup, no reversal signals.
+        activeWarnings:
+          type: array
+          items:
+            type: string
+          description: |
+            Active warning badges from the advanced engine, e.g.
+            MOMENTUM REVERSING, MACD WEAKENING, STRONG IMPULSE AGAINST, TREND EXHAUSTED,
+            REVERSAL STARTING, LIQUIDITY TRAP, CHOPPY MARKET, REVERSAL RISK HIGH.
+        debugInfo:
+          type: object
+          description: |
+            Advanced engine debug breakdown for developer inspection.
+            Contains rsiDivergence, macdDecay, oppositeDisplacement, reversalFactors,
+            gradeFactors, and confidenceAdj fields.
         timeframe:
           type: string
         indicators:

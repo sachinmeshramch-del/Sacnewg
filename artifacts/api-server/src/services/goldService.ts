@@ -1,5 +1,7 @@
 import { getFinnhubPrice, isFinnhubConnected } from "./finnhubService.js";
 import { getSpotPrice } from "./spotGoldService.js";
+import { runAdvancedAnalysis } from "./advancedEngines.js";
+import type { AdvancedAnalysis, TrendState } from "./advancedEngines.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface OHLCData {
@@ -144,6 +146,18 @@ interface SignalResult {
   momentumAlignmentReason?: string;
   // true when RSI direction flips to align with the trade (DOWN→UP for BUY or UP→DOWN for SELL)
   momentumShiftDetected?: boolean;
+  // ── Advanced Momentum Reversal + Smart Trend Engine ────────────────────────
+  // signalGrade: A+/A/B/C/D quality score based on setup clarity + risk factors
+  signalGrade?: "A+" | "A" | "B" | "C" | "D";
+  // trendState: 7-state advanced trend classification (replaces the 3-state marketState
+  // for deeper analysis; both fields coexist in the response)
+  trendState?: TrendState;
+  // reversalRisk: HIGH = 3+ reversal factors; MEDIUM = 1-2; LOW = clean setup
+  reversalRisk?: "HIGH" | "MEDIUM" | "LOW";
+  // activeWarnings: warning badge labels surfaced by the advanced engine
+  activeWarnings?: string[];
+  // debugInfo: full advanced-engine breakdown for the debug panel
+  debugInfo?: AdvancedAnalysis["debugInfo"];
   timeframe: string;
   indicators: Indicators;
   timestamp: string;
@@ -2902,6 +2916,27 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
         calcEMA(cleanArray(ohlc.close), 50),
       )
     : 0;
+
+  // ── Advanced Momentum Reversal + Smart Trend Engine ──────────────────────
+  // Runs after chopScore is known (chopScore feeds the trendState classifier).
+  // Returns signalGrade, trendState, reversalRisk, confidenceAdjustment, and
+  // activeWarnings — all additive to the existing score engine, never replacing it.
+  const advancedAnalysis = ohlc
+    ? runAdvancedAnalysis(
+        {
+          open:   cleanArray(ohlc.open),
+          high:   cleanArray(ohlc.high),
+          low:    cleanArray(ohlc.low),
+          close:  cleanArray(ohlc.close),
+          volume: cleanArray(ohlc.volume),
+        },
+        indicators,
+        chopScore,
+        filteredResult.score ?? 0,
+        filteredResult.signal,
+      )
+    : null;
+
   const marketRegime   = classifyMarketRegime(
     indicators.trendDirection, indicators.trendStrength,
     chopScore, conflict.level,
@@ -3013,6 +3048,14 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
   const result: SignalResult = {
     ...filteredResult,
     signal: decisionSignal,
+    // Apply advanced confidence adjustment — capped to keep value in 5..95.
+    // Only fires on directional BUY/SELL signals; HOLD/SETUP/CONFLICT unchanged.
+    confidence: Math.max(5, Math.min(95,
+      filteredResult.confidence +
+      (advancedAnalysis && (decisionSignal === "BUY" || decisionSignal === "SELL")
+        ? advancedAnalysis.confidenceAdjustment
+        : 0),
+    )),
     signalLabel: softenedLabel,
     permission,
     marketRegime,
@@ -3034,6 +3077,12 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     momentumAlignmentStatus,
     momentumAlignmentReason,
     momentumShiftDetected,
+    // ── Advanced Momentum Reversal + Smart Trend Engine outputs ──────────────
+    signalGrade:    advancedAnalysis?.signalGrade,
+    trendState:     advancedAnalysis?.trendState,
+    reversalRisk:   advancedAnalysis?.reversalRisk,
+    activeWarnings: advancedAnalysis?.activeWarnings,
+    debugInfo:      advancedAnalysis?.debugInfo,
     timestamp: new Date().toISOString(),
   };
 

@@ -339,20 +339,89 @@ export const ScalperSignalResponseMomentumBias = {
 
 /**
  * Momentum Alignment + Auto Delay Entry gate.
- * CONFIRMED = RSI aligned + strong candle.
- * DELAYED   = RSI flat/neutral — waiting for alignment.
- * BLOCKED   = RSI actively opposes trade direction.
- * WAITING   = confidence < 60 or confirmation not yet met.
+CONFIRMED = RSI aligned with trade direction + strong candle printed.
+DELAYED   = RSI is flat/neutral — waiting for momentum to align.
+BLOCKED   = RSI is actively opposing the trade direction.
+WAITING   = confidence < 60 or 2-candle confirmation not yet met.
+
  */
 export type ScalperSignalResponseMomentumAlignmentStatus =
   (typeof ScalperSignalResponseMomentumAlignmentStatus)[keyof typeof ScalperSignalResponseMomentumAlignmentStatus];
 
 export const ScalperSignalResponseMomentumAlignmentStatus = {
   CONFIRMED: "CONFIRMED",
-  DELAYED:   "DELAYED",
-  BLOCKED:   "BLOCKED",
-  WAITING:   "WAITING",
+  DELAYED: "DELAYED",
+  BLOCKED: "BLOCKED",
+  WAITING: "WAITING",
 } as const;
+
+/**
+ * Advanced signal quality grade from the Momentum Reversal Engine.
+A+ = optimal setup (score≥7, strong trend, no divergence, reversal risk LOW).
+A = good setup with minor limitations.
+B = tradable but caution warranted (MACD fading or moderate risk).
+C = risky setup (reversal signals active, choppy).
+D = avoid (HIGH reversal risk, score<2, or severe conflict).
+
+ */
+export type ScalperSignalResponseSignalGrade =
+  (typeof ScalperSignalResponseSignalGrade)[keyof typeof ScalperSignalResponseSignalGrade];
+
+export const ScalperSignalResponseSignalGrade = {
+  "A+": "A+",
+  A: "A",
+  B: "B",
+  C: "C",
+  D: "D",
+} as const;
+
+/**
+ * Advanced 7-state trend classification from the Momentum Reversal Engine.
+TRENDING_STRONG = confirmed strong trend, all systems go.
+TRENDING_WEAK = directional but lacking strength.
+REVERSAL_STARTING = ≥2 reversal signals active (divergence + displacement + exhaustion).
+CHOPPY = chop score >0.6, avoid trading.
+EXHAUSTED_TREND = exhaustion candles or MACD decay with divergence.
+BREAKOUT_BUILDUP = range compression before breakout.
+LIQUIDITY_TRAP = fake breakout/stop hunt pattern detected.
+
+ */
+export type ScalperSignalResponseTrendState =
+  (typeof ScalperSignalResponseTrendState)[keyof typeof ScalperSignalResponseTrendState];
+
+export const ScalperSignalResponseTrendState = {
+  TRENDING_STRONG: "TRENDING_STRONG",
+  TRENDING_WEAK: "TRENDING_WEAK",
+  REVERSAL_STARTING: "REVERSAL_STARTING",
+  CHOPPY: "CHOPPY",
+  EXHAUSTED_TREND: "EXHAUSTED_TREND",
+  BREAKOUT_BUILDUP: "BREAKOUT_BUILDUP",
+  LIQUIDITY_TRAP: "LIQUIDITY_TRAP",
+} as const;
+
+/**
+ * Reversal protection risk rating.
+HIGH = 3+ factors active (RSI divergence + MACD decay + displacement + structure break).
+MEDIUM = 1-2 reversal factors active.
+LOW = clean setup, no reversal signals.
+
+ */
+export type ScalperSignalResponseReversalRisk =
+  (typeof ScalperSignalResponseReversalRisk)[keyof typeof ScalperSignalResponseReversalRisk];
+
+export const ScalperSignalResponseReversalRisk = {
+  HIGH: "HIGH",
+  MEDIUM: "MEDIUM",
+  LOW: "LOW",
+} as const;
+
+/**
+ * Advanced engine debug breakdown for developer inspection.
+Contains rsiDivergence, macdDecay, oppositeDisplacement, reversalFactors,
+gradeFactors, and confidenceAdj fields.
+
+ */
+export type ScalperSignalResponseDebugInfo = { [key: string]: unknown };
 
 export interface ScalperSignalResponse {
   /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming; CONFLICT = indicators disagree or chop detected, do not trade. */
@@ -423,12 +492,51 @@ long opposite-side wick + above-avg volume = liquidity grab).
   momentumBias?: ScalperSignalResponseMomentumBias;
   /** Trend Memory — signed momentum score = (close[t] − close[t−8]) / (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias. */
   momentumScore?: number;
-  /** Momentum Alignment + Auto Delay Entry gate. CONFIRMED = RSI aligned + strong candle. DELAYED = waiting for RSI to align. BLOCKED = RSI opposes direction. WAITING = low confidence or unconfirmed. */
+  /** Momentum Alignment + Auto Delay Entry gate.
+CONFIRMED = RSI aligned with trade direction + strong candle printed.
+DELAYED   = RSI is flat/neutral — waiting for momentum to align.
+BLOCKED   = RSI is actively opposing the trade direction.
+WAITING   = confidence < 60 or 2-candle confirmation not yet met.
+ */
   momentumAlignmentStatus?: ScalperSignalResponseMomentumAlignmentStatus;
-  /** Machine-readable reason for the current momentumAlignmentStatus (e.g. RSI_NOT_ALIGNED, WEAK_CANDLE, ALL_CONDITIONS_MET). */
+  /** Machine-readable reason code for the current momentumAlignmentStatus (e.g. RSI_NOT_ALIGNED, WEAK_CANDLE, ALL_CONDITIONS_MET). */
   momentumAlignmentReason?: string;
-  /** True when RSI direction flips to align with the trade this bar: DOWN→UP for BUY, UP→DOWN for SELL. */
+  /** True when RSI direction flips to align with the trade this bar: DOWN→UP for BUY, UP→DOWN for SELL. Triggers the Momentum Shift Detected label. */
   momentumShiftDetected?: boolean;
+  /** Advanced signal quality grade from the Momentum Reversal Engine.
+A+ = optimal setup (score≥7, strong trend, no divergence, reversal risk LOW).
+A = good setup with minor limitations.
+B = tradable but caution warranted (MACD fading or moderate risk).
+C = risky setup (reversal signals active, choppy).
+D = avoid (HIGH reversal risk, score<2, or severe conflict).
+ */
+  signalGrade?: ScalperSignalResponseSignalGrade;
+  /** Advanced 7-state trend classification from the Momentum Reversal Engine.
+TRENDING_STRONG = confirmed strong trend, all systems go.
+TRENDING_WEAK = directional but lacking strength.
+REVERSAL_STARTING = ≥2 reversal signals active (divergence + displacement + exhaustion).
+CHOPPY = chop score >0.6, avoid trading.
+EXHAUSTED_TREND = exhaustion candles or MACD decay with divergence.
+BREAKOUT_BUILDUP = range compression before breakout.
+LIQUIDITY_TRAP = fake breakout/stop hunt pattern detected.
+ */
+  trendState?: ScalperSignalResponseTrendState;
+  /** Reversal protection risk rating.
+HIGH = 3+ factors active (RSI divergence + MACD decay + displacement + structure break).
+MEDIUM = 1-2 reversal factors active.
+LOW = clean setup, no reversal signals.
+ */
+  reversalRisk?: ScalperSignalResponseReversalRisk;
+  /** Active warning badges from the advanced engine, e.g.
+MOMENTUM REVERSING, MACD WEAKENING, STRONG IMPULSE AGAINST, TREND EXHAUSTED,
+REVERSAL STARTING, LIQUIDITY TRAP, CHOPPY MARKET, REVERSAL RISK HIGH.
+ */
+  activeWarnings?: string[];
+  /** Advanced engine debug breakdown for developer inspection.
+Contains rsiDivergence, macdDecay, oppositeDisplacement, reversalFactors,
+gradeFactors, and confidenceAdj fields.
+ */
+  debugInfo?: ScalperSignalResponseDebugInfo;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: string;

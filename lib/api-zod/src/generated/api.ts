@@ -228,30 +228,6 @@ export const GetSignalResponse = zod.object({
     .describe(
       "Pullback State Detector — BULLISH_PULLBACK = price retracing inside a bullish trend (between EMA50 and EMA20); BEARISH_PULLBACK = mirror for bearish; NONE = no active pullback.",
     ),
-  pullbackStrength: zod
-    .enum(["STRONG_TREND", "PULLBACK", "WEAK_PULLBACK", "NO_TRADE"])
-    .optional()
-    .describe(
-      "Pullback strength classification — STRONG_TREND = trending with momentum; PULLBACK = all 3 confirmation conditions met; WEAK_PULLBACK = partial confirmation; NO_TRADE = insufficient setup.",
-    ),
-  rsiDirection: zod
-    .enum(["RISING", "FALLING", "FLAT"])
-    .optional()
-    .describe(
-      "RSI momentum direction vs previous bar — RISING = RSI bouncing up (BUY confirmation); FALLING = RSI dropping (SELL confirmation); FLAT = no meaningful change.",
-    ),
-  entryMode: zod
-    .enum(["AUTO", "CONFIRMED", "WAITING"])
-    .optional()
-    .describe(
-      "Entry mode — AUTO = momentum candle triggered (no waiting); CONFIRMED = pullback zone conditions all met; WAITING = trend signal accumulating confirmation.",
-    ),
-  signalCategory: zod
-    .enum(["MOMENTUM", "PULLBACK", "TREND", "REVERSAL"])
-    .optional()
-    .describe(
-      "High-level signal category — MOMENTUM = strong candle + 3 consecutive + strong EMA sep; PULLBACK = near-EMA retracement confirmed; TREND = score-engine trend; REVERSAL = trap pattern.",
-    ),
   momentumBias: zod
     .enum(["BULLISH", "BEARISH", "NEUTRAL"])
     .optional()
@@ -263,6 +239,63 @@ export const GetSignalResponse = zod.object({
     .optional()
     .describe(
       "Trend Memory — signed momentum score = (close[t] − close[t−8]) \/ (ATR × 1.5). |score| ≥ 0.6 triggers a directional bias.",
+    ),
+  momentumAlignmentStatus: zod
+    .enum(["CONFIRMED", "DELAYED", "BLOCKED", "WAITING"])
+    .optional()
+    .describe(
+      "Momentum Alignment + Auto Delay Entry gate.\nCONFIRMED = RSI aligned with trade direction + strong candle printed.\nDELAYED   = RSI is flat\/neutral — waiting for momentum to align.\nBLOCKED   = RSI is actively opposing the trade direction.\nWAITING   = confidence < 60 or 2-candle confirmation not yet met.\n",
+    ),
+  momentumAlignmentReason: zod
+    .string()
+    .optional()
+    .describe(
+      "Machine-readable reason code for the current momentumAlignmentStatus (e.g. RSI_NOT_ALIGNED, WEAK_CANDLE, ALL_CONDITIONS_MET).",
+    ),
+  momentumShiftDetected: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when RSI direction flips to align with the trade this bar: DOWN→UP for BUY, UP→DOWN for SELL. Triggers the Momentum Shift Detected label.",
+    ),
+  signalGrade: zod
+    .enum(["A+", "A", "B", "C", "D"])
+    .optional()
+    .describe(
+      "Advanced signal quality grade from the Momentum Reversal Engine.\nA+ = optimal setup (score≥7, strong trend, no divergence, reversal risk LOW).\nA = good setup with minor limitations.\nB = tradable but caution warranted (MACD fading or moderate risk).\nC = risky setup (reversal signals active, choppy).\nD = avoid (HIGH reversal risk, score<2, or severe conflict).\n",
+    ),
+  trendState: zod
+    .enum([
+      "TRENDING_STRONG",
+      "TRENDING_WEAK",
+      "REVERSAL_STARTING",
+      "CHOPPY",
+      "EXHAUSTED_TREND",
+      "BREAKOUT_BUILDUP",
+      "LIQUIDITY_TRAP",
+    ])
+    .optional()
+    .describe(
+      "Advanced 7-state trend classification from the Momentum Reversal Engine.\nTRENDING_STRONG = confirmed strong trend, all systems go.\nTRENDING_WEAK = directional but lacking strength.\nREVERSAL_STARTING = ≥2 reversal signals active (divergence + displacement + exhaustion).\nCHOPPY = chop score >0.6, avoid trading.\nEXHAUSTED_TREND = exhaustion candles or MACD decay with divergence.\nBREAKOUT_BUILDUP = range compression before breakout.\nLIQUIDITY_TRAP = fake breakout\/stop hunt pattern detected.\n",
+    ),
+  reversalRisk: zod
+    .enum(["HIGH", "MEDIUM", "LOW"])
+    .optional()
+    .describe(
+      "Reversal protection risk rating.\nHIGH = 3+ factors active (RSI divergence + MACD decay + displacement + structure break).\nMEDIUM = 1-2 reversal factors active.\nLOW = clean setup, no reversal signals.\n",
+    ),
+  activeWarnings: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Active warning badges from the advanced engine, e.g.\nMOMENTUM REVERSING, MACD WEAKENING, STRONG IMPULSE AGAINST, TREND EXHAUSTED,\nREVERSAL STARTING, LIQUIDITY TRAP, CHOPPY MARKET, REVERSAL RISK HIGH.\n",
+    ),
+  debugInfo: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Advanced engine debug breakdown for developer inspection.\nContains rsiDivergence, macdDecay, oppositeDisplacement, reversalFactors,\ngradeFactors, and confidenceAdj fields.\n",
     ),
   timeframe: zod.string(),
   indicators: zod.object({

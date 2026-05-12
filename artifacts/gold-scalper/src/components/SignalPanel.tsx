@@ -256,6 +256,18 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                       CHOP {Math.round(data.chopScore * 100)}
                     </span>
                   )}
+                  {(data as any).signalGrade && (data.signal === "BUY" || data.signal === "SELL") && (
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-md text-[9.5px] font-black tracking-widest uppercase border",
+                      (data as any).signalGrade === "A+" && "border-emerald-400/60 bg-emerald-400/15 text-emerald-300",
+                      (data as any).signalGrade === "A"  && "border-success/60 bg-success/15 text-success",
+                      (data as any).signalGrade === "B"  && "border-primary/50 bg-primary/10 text-primary",
+                      (data as any).signalGrade === "C"  && "border-warning/50 bg-warning/10 text-warning",
+                      (data as any).signalGrade === "D"  && "border-destructive/40 bg-destructive/10 text-destructive/80",
+                    )}>
+                      GRADE {(data as any).signalGrade}
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -320,6 +332,29 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                     {data.marketState === "EXHAUSTED" ? "💤" : "⚠"}
                   </span>
                   {data.marketState === "EXHAUSTED" ? "MOMENTUM EXHAUSTED" : "REVERSAL WATCH"}
+                </div>
+              )}
+
+              {/* Active Warnings — Advanced Momentum Reversal Engine badges */}
+              {(data as any).activeWarnings && (data as any).activeWarnings.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1 justify-center">
+                  {((data as any).activeWarnings as string[]).map((w: string, i: number) => (
+                    <span key={i} className={cn(
+                      "px-2 py-0.5 rounded-md text-[9px] font-black tracking-widest uppercase border inline-flex items-center gap-1",
+                      w === "REVERSAL RISK HIGH"     && "border-destructive/70 bg-destructive/15 text-destructive animate-pulse",
+                      w === "MOMENTUM REVERSING"     && "border-destructive/55 bg-destructive/10 text-destructive/90",
+                      w === "STRONG IMPULSE AGAINST" && "border-destructive/45 bg-destructive/8 text-destructive/80",
+                      w === "MACD WEAKENING"         && "border-warning/55 bg-warning/10 text-warning",
+                      w === "TREND EXHAUSTED"        && "border-warning/50 bg-warning/10 text-warning/90",
+                      w === "REVERSAL STARTING"      && "border-amber-400/55 bg-amber-400/10 text-amber-200",
+                      w === "LIQUIDITY TRAP"         && "border-amber-400/55 bg-amber-400/10 text-amber-200",
+                      w === "CHOPPY MARKET"          && "border-muted/50 bg-muted/10 text-muted-foreground",
+                      w === "MOMENTUM DIVERGENCE"    && "border-orange-400/50 bg-orange-400/10 text-orange-200",
+                    )}>
+                      <span className="text-[8px] leading-none">⚠</span>
+                      {w}
+                    </span>
+                  ))}
                 </div>
               )}
 
@@ -533,6 +568,39 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                       </span>
                     </div>
                   )}
+
+                  {/* Row: Trend State — 7-state advanced classifier */}
+                  {(data as any).trendState && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Trend State</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px]",
+                        (data as any).trendState === "TRENDING_STRONG"   && "text-emerald-300",
+                        (data as any).trendState === "TRENDING_WEAK"     && "text-success",
+                        (data as any).trendState === "REVERSAL_STARTING" && "text-destructive",
+                        (data as any).trendState === "CHOPPY"            && "text-amber-200",
+                        (data as any).trendState === "EXHAUSTED_TREND"   && "text-warning",
+                        (data as any).trendState === "BREAKOUT_BUILDUP"  && "text-primary",
+                        (data as any).trendState === "LIQUIDITY_TRAP"    && "text-amber-300",
+                      )}>
+                        {((data as any).trendState as string).replace(/_/g, " ")}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: Reversal Risk — only shown when MEDIUM or HIGH */}
+                  {(data as any).reversalRisk && (data as any).reversalRisk !== "LOW" && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Reversal Risk</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px] inline-flex items-center gap-1",
+                        (data as any).reversalRisk === "HIGH"   && "text-destructive",
+                        (data as any).reversalRisk === "MEDIUM" && "text-warning",
+                      )}>
+                        {(data as any).reversalRisk === "HIGH" ? "⚠ HIGH" : "△ MEDIUM"}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -689,6 +757,39 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 <div className="mt-2 text-[10px] text-muted-foreground tracking-wide">
                   {data.signalLabel}
                 </div>
+              )}
+
+              {/* Advanced Engine Debug Panel — collapsed by default, dev-only */}
+              {(data as any).debugInfo && (
+                <details className="mt-3 w-full max-w-[280px] mx-auto">
+                  <summary className="cursor-pointer select-none text-[9px] uppercase tracking-widest text-muted-foreground/40 text-center py-1 hover:text-muted-foreground/60 transition-colors">
+                    Advanced Engine Debug ▸
+                  </summary>
+                  <div className="mt-1.5 rounded-md border border-border/30 bg-card/30 px-3 py-2 text-[9px] text-muted-foreground/60 space-y-1 font-mono">
+                    <div><span className="text-muted-foreground/40">RSI Div:</span> {(data as any).debugInfo.rsiDivergence}</div>
+                    <div><span className="text-muted-foreground/40">MACD:</span> {(data as any).debugInfo.macdDecay}</div>
+                    <div><span className="text-muted-foreground/40">Displace:</span> {(data as any).debugInfo.oppositeDisplacement}</div>
+                    <div className={cn(
+                      "font-bold",
+                      (data as any).debugInfo.confidenceAdj < 0 ? "text-destructive/70" :
+                      (data as any).debugInfo.confidenceAdj > 0 ? "text-success/70" : "text-muted-foreground/40"
+                    )}>
+                      Conf Adj: {(data as any).debugInfo.confidenceAdj > 0 ? "+" : ""}{(data as any).debugInfo.confidenceAdj}
+                    </div>
+                    {((data as any).debugInfo.reversalFactors as string[]).length > 0 && (
+                      <div className="text-warning/60">
+                        <span className="text-muted-foreground/40">Risk:</span>{" "}
+                        {((data as any).debugInfo.reversalFactors as string[]).join(" · ")}
+                      </div>
+                    )}
+                    {((data as any).debugInfo.gradeFactors as string[]).length > 0 && (
+                      <div className="text-muted-foreground/50">
+                        <span className="text-muted-foreground/40">Grade:</span>{" "}
+                        {((data as any).debugInfo.gradeFactors as string[]).join(" · ")}
+                      </div>
+                    )}
+                  </div>
+                </details>
               )}
 
               <div className="mt-5 w-full max-w-xs space-y-2">
