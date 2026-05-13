@@ -460,6 +460,82 @@ components:
             Advanced engine debug breakdown for developer inspection.
             Contains rsiDivergence, macdDecay, oppositeDisplacement, reversalFactors,
             gradeFactors, and confidenceAdj fields.
+        marketStructure:
+          type: string
+          enum:
+            - BULLISH_TRENDING
+            - BEARISH_TRENDING
+            - BOS_BULLISH
+            - BOS_BEARISH
+            - CHOCH_BULLISH
+            - CHOCH_BEARISH
+            - LIQUIDITY_SWEEP
+            - RANGE_COMPRESSION
+            - CHOPPY
+          description: Institutional market structure state from the structure engine.
+        structureQuality:
+          type: string
+          enum: [STRONG, MODERATE, WEAK, NONE]
+          description: Quality of the detected structure pattern.
+        structureBlockReason:
+          type: string
+          nullable: true
+          description: Reason why structure engine blocks the current signal side.
+        bosDetected:
+          type: boolean
+        bosDirection:
+          type: string
+          enum: [BULLISH, BEARISH, NONE]
+        chochDetected:
+          type: boolean
+        chochDirection:
+          type: string
+          enum: [BULLISH, BEARISH, NONE]
+        liquiditySweepDetected:
+          type: boolean
+        rangeCompression:
+          type: boolean
+        structureLabels:
+          type: array
+          items:
+            type: string
+          description: HH/HL/LH/LL labels for the last 4 swing points.
+        structureDebug:
+          type: string
+        momentumQualityScore:
+          type: number
+          description: 0–100 momentum quality score from the momentum engine.
+        momentumQualityLabel:
+          type: string
+          enum: [STRONG_IMPULSE, GOOD_TREND, WEAK, NO_TRADE]
+        momentumExhausted:
+          type: boolean
+        momentumExhaustionReasons:
+          type: array
+          items:
+            type: string
+        stackingSafe:
+          type: boolean
+          description: Whether stacking an additional entry is safe per the momentum engine.
+        autoTradeSafe:
+          type: boolean
+          description: Whether the signal meets all auto-trade safety criteria.
+        momentumDebug:
+          type: string
+        weightedConfidenceBreakdown:
+          type: object
+          description: |
+            Breakdown of the weighted confidence model.
+            structure(0-25) + ema(0-15) + momentum(0-20) + mtf(0-15) + rsi(0-5) + chopFilter(0-10) + velocityVolume(0-10) = total(0-100)
+          properties:
+            structure:     { type: number }
+            ema:           { type: number }
+            momentum:      { type: number }
+            mtf:           { type: number }
+            rsi:           { type: number }
+            chopFilter:    { type: number }
+            velocityVolume: { type: number }
+            total:         { type: number }
         timeframe:
           type: string
         indicators:

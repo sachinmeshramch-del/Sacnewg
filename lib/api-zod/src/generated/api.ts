@@ -297,6 +297,76 @@ export const GetSignalResponse = zod.object({
     .describe(
       "Advanced engine debug breakdown for developer inspection.\nContains rsiDivergence, macdDecay, oppositeDisplacement, reversalFactors,\ngradeFactors, and confidenceAdj fields.\n",
     ),
+  marketStructure: zod
+    .enum([
+      "BULLISH_TRENDING",
+      "BEARISH_TRENDING",
+      "BOS_BULLISH",
+      "BOS_BEARISH",
+      "CHOCH_BULLISH",
+      "CHOCH_BEARISH",
+      "LIQUIDITY_SWEEP",
+      "RANGE_COMPRESSION",
+      "CHOPPY",
+    ])
+    .optional()
+    .describe(
+      "Institutional market structure state from the structure engine.",
+    ),
+  structureQuality: zod
+    .enum(["STRONG", "MODERATE", "WEAK", "NONE"])
+    .optional()
+    .describe("Quality of the detected structure pattern."),
+  structureBlockReason: zod
+    .string()
+    .nullish()
+    .describe("Reason why structure engine blocks the current signal side."),
+  bosDetected: zod.boolean().optional(),
+  bosDirection: zod.enum(["BULLISH", "BEARISH", "NONE"]).optional(),
+  chochDetected: zod.boolean().optional(),
+  chochDirection: zod.enum(["BULLISH", "BEARISH", "NONE"]).optional(),
+  liquiditySweepDetected: zod.boolean().optional(),
+  rangeCompression: zod.boolean().optional(),
+  structureLabels: zod
+    .array(zod.string())
+    .optional()
+    .describe("HH\/HL\/LH\/LL labels for the last 4 swing points."),
+  structureDebug: zod.string().optional(),
+  momentumQualityScore: zod
+    .number()
+    .optional()
+    .describe("0–100 momentum quality score from the momentum engine."),
+  momentumQualityLabel: zod
+    .enum(["STRONG_IMPULSE", "GOOD_TREND", "WEAK", "NO_TRADE"])
+    .optional(),
+  momentumExhausted: zod.boolean().optional(),
+  momentumExhaustionReasons: zod.array(zod.string()).optional(),
+  stackingSafe: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Whether stacking an additional entry is safe per the momentum engine.",
+    ),
+  autoTradeSafe: zod
+    .boolean()
+    .optional()
+    .describe("Whether the signal meets all auto-trade safety criteria."),
+  momentumDebug: zod.string().optional(),
+  weightedConfidenceBreakdown: zod
+    .object({
+      structure: zod.number().optional(),
+      ema: zod.number().optional(),
+      momentum: zod.number().optional(),
+      mtf: zod.number().optional(),
+      rsi: zod.number().optional(),
+      chopFilter: zod.number().optional(),
+      velocityVolume: zod.number().optional(),
+      total: zod.number().optional(),
+    })
+    .optional()
+    .describe(
+      "Breakdown of the weighted confidence model.\nstructure(0-25) + ema(0-15) + momentum(0-20) + mtf(0-15) + rsi(0-5) + chopFilter(0-10) + velocityVolume(0-10) = total(0-100)\n",
+    ),
   timeframe: zod.string(),
   indicators: zod.object({
     rsi: zod.number(),

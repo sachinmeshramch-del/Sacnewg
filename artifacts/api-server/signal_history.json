@@ -1,6 +1,21 @@
 {
   "items": [
     {
+      "id": 265,
+      "signal": "BUY",
+      "confidence": 49,
+      "entry": 4699.9,
+      "stopLoss": 4698.71,
+      "takeProfit": 4702.52,
+      "trend": "BULLISH",
+      "timeframe": "1m",
+      "timestamp": "2026-05-13T05:00:12.305Z",
+      "outcome": "PENDING",
+      "permission": "QUALIFIED",
+      "signalStatus": "CONFIRMED",
+      "signalType": "WEAK"
+    },
+    {
       "id": 264,
       "signal": "SELL",
       "confidence": 50,
@@ -151,5 +166,5 @@
       "signalType": "STRONG"
     }
   ],
-  "counter": 265
+  "counter": 266
 }

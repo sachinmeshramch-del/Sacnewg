@@ -2,6 +2,10 @@ import { getFinnhubPrice, isFinnhubConnected } from "./finnhubService.js";
 import { getSpotPrice } from "./spotGoldService.js";
 import { runAdvancedAnalysis } from "./advancedEngines.js";
 import type { AdvancedAnalysis, TrendState } from "./advancedEngines.js";
+import { runStructureAnalysis } from "./structureEngine.js";
+import type { StructureAnalysis, MarketStructureState } from "./structureEngine.js";
+import { runMomentumAnalysis } from "./momentumEngine.js";
+import type { MomentumAnalysis } from "./momentumEngine.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface OHLCData {
@@ -147,17 +151,42 @@ interface SignalResult {
   // true when RSI direction flips to align with the trade (DOWN→UP for BUY or UP→DOWN for SELL)
   momentumShiftDetected?: boolean;
   // ── Advanced Momentum Reversal + Smart Trend Engine ────────────────────────
-  // signalGrade: A+/A/B/C/D quality score based on setup clarity + risk factors
   signalGrade?: "A+" | "A" | "B" | "C" | "D";
-  // trendState: 7-state advanced trend classification (replaces the 3-state marketState
-  // for deeper analysis; both fields coexist in the response)
   trendState?: TrendState;
-  // reversalRisk: HIGH = 3+ reversal factors; MEDIUM = 1-2; LOW = clean setup
   reversalRisk?: "HIGH" | "MEDIUM" | "LOW";
-  // activeWarnings: warning badge labels surfaced by the advanced engine
   activeWarnings?: string[];
-  // debugInfo: full advanced-engine breakdown for the debug panel
   debugInfo?: AdvancedAnalysis["debugInfo"];
+  // ── Institutional Market Structure Engine ────────────────────────────────
+  marketStructure?: MarketStructureState;
+  structureQuality?: "STRONG" | "MODERATE" | "WEAK" | "NONE";
+  structureBlockReason?: string | null;
+  bosDetected?: boolean;
+  bosDirection?: "BULLISH" | "BEARISH" | "NONE";
+  chochDetected?: boolean;
+  chochDirection?: "BULLISH" | "BEARISH" | "NONE";
+  liquiditySweepDetected?: boolean;
+  rangeCompression?: boolean;
+  structureLabels?: string[];
+  structureDebug?: string;
+  // ── Momentum Quality Engine ──────────────────────────────────────────────
+  momentumQualityScore?: number;          // 0–100
+  momentumQualityLabel?: "STRONG_IMPULSE" | "GOOD_TREND" | "WEAK" | "NO_TRADE";
+  momentumExhausted?: boolean;
+  momentumExhaustionReasons?: string[];
+  stackingSafe?: boolean;
+  autoTradeSafe?: boolean;
+  momentumDebug?: string;
+  // ── Weighted Confidence Breakdown ────────────────────────────────────────
+  weightedConfidenceBreakdown?: {
+    structure: number;       // 0–25
+    ema: number;             // 0–15
+    momentum: number;        // 0–20
+    mtf: number;             // 0–15
+    rsi: number;             // 0–5
+    chopFilter: number;      // 0–10
+    velocityVolume: number;  // 0–10
+    total: number;
+  };
   timeframe: string;
   indicators: Indicators;
   timestamp: string;
@@ -2796,7 +2825,7 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
   if (cache && Date.now() < expiry) return cache;
 
   const interval = is1m ? "1m" : "5m";
-  const range    = is1m ? "1h" : "1d";
+  const range    = is1m ? "5d" : "5d";  // 5d ensures enough candles for structure engine (min 10)
 
   // Fetch entry-TF candles, live spot price, and the higher-TF (15m) trend
   // in parallel — they're independent.
@@ -2918,9 +2947,6 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     : 0;
 
   // ── Advanced Momentum Reversal + Smart Trend Engine ──────────────────────
-  // Runs after chopScore is known (chopScore feeds the trendState classifier).
-  // Returns signalGrade, trendState, reversalRisk, confidenceAdjustment, and
-  // activeWarnings — all additive to the existing score engine, never replacing it.
   const advancedAnalysis = ohlc
     ? runAdvancedAnalysis(
         {
@@ -2936,6 +2962,192 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
         filteredResult.signal,
       )
     : null;
+
+  // ── Institutional Market Structure Engine ─────────────────────────────────
+  const rawHighs  = ohlc ? cleanArray(ohlc.high)  : [];
+  const rawLows   = ohlc ? cleanArray(ohlc.low)   : [];
+  const rawCloses = ohlc ? cleanArray(ohlc.close) : [];
+  let structureAnalysis: StructureAnalysis | null = null;
+  if (ohlc && rawCloses.length >= 10) {
+    try {
+      structureAnalysis = runStructureAnalysis(
+        rawHighs, rawLows, rawCloses,
+        indicators.ema20, indicators.ema50, indicators.atr,
+        filteredResult.signal as "BUY" | "SELL" | "HOLD" | "SETUP" | "CONFLICT",
+      );
+    } catch (e) {
+      console.error("[StructureEngine] Error:", (e as Error).message, (e as Error).stack?.substring(0,300));
+    }
+  }
+
+  // ── Momentum Quality Engine ───────────────────────────────────────────────
+  const ema20Series: number[] = ohlc
+    ? calcEMA(rawCloses, 20)
+    : [indicators.ema20];
+  const momentumAnalysis: MomentumAnalysis | null = ohlc && rawCloses.length >= 10
+    ? runMomentumAnalysis({
+        open:  cleanArray(ohlc.open),
+        high:  rawHighs,
+        low:   rawLows,
+        close: rawCloses,
+        atr:   indicators.atr,
+        ema20: indicators.ema20,
+        ema50: indicators.ema50,
+        macdHistogram:      indicators.macdHistogram,
+        prevMacdHistogram:  indicators.prevMacdHistogram,
+        rsi:   indicators.rsi,
+        isTrending:    indicators.isTrending,
+        isStrongTrend: indicators.isStrongTrend,
+        trendDirection: indicators.trendDirection,
+        ema20Series,
+      })
+    : null;
+
+  // ── Weighted Confidence Model ─────────────────────────────────────────────
+  // Replaces the simple (score/10)*100 model with a weighted breakdown:
+  //   Structure Alignment  = 25%
+  //   EMA Alignment        = 15%
+  //   Momentum Quality     = 20%
+  //   MTF Confirmation     = 15%
+  //   RSI Logic            = 5%
+  //   Chop Filter          = 10%
+  //   Velocity/Volume      = 10%
+  // Each axis contributes its max share only when fully satisfied.
+  const decisionSide = filteredResult.signal === "BUY" || filteredResult.signal === "SELL"
+    ? filteredResult.signal : null;
+
+  let wcStructure     = structureAnalysis?.confidenceScore    ?? 10;  // 0–25
+  let wcEma           = 0;
+  let wcMomentum      = momentumAnalysis?.confidenceContrib   ?? 7;   // 0–20
+  let wcMtf           = 0;
+  let wcRsi           = 0;
+  let wcChopFilter    = 0;
+  let wcVelocityVol   = 0;
+
+  if (decisionSide) {
+    // EMA contribution (0–15)
+    const emaAligned = decisionSide === "BUY" ? indicators.ema20 > indicators.ema50 : indicators.ema20 < indicators.ema50;
+    const emaSep     = Math.abs(indicators.ema20 - indicators.ema50);
+    wcEma = emaAligned
+      ? (emaSep > indicators.atr ? 15 : emaSep > indicators.atr * 0.5 ? 11 : 7)
+      : 2;
+
+    // MTF contribution (0–15)
+    const mtf = filteredResult.mtfStatus;
+    wcMtf = mtf === "SUPPORTIVE" || mtf === "ALIGNED" ? 15
+          : mtf === "NEUTRAL"                         ? 8
+          : 2;  // CONTRA
+
+    // RSI contribution (0–5) — correct RSI direction adds clarity, wrong subtracts
+    const rsiBuy  = decisionSide === "BUY"  && indicators.rsi < 65 && indicators.rsiRising;
+    const rsiSell = decisionSide === "SELL" && indicators.rsi > 35 && indicators.rsiDecreasing;
+    const rsiWrong = (decisionSide === "BUY" && indicators.rsi > 72) ||
+                     (decisionSide === "SELL" && indicators.rsi < 28);
+    wcRsi = rsiWrong ? 0 : (rsiBuy || rsiSell) ? 5 : 2;
+
+    // Chop filter contribution (0–10)
+    // High chopScore = market is choppy = low contribution
+    wcChopFilter = chopScore < 0.3 ? 10
+                 : chopScore < 0.5 ? 7
+                 : chopScore < 0.7 ? 3
+                 : 0;
+
+    // Velocity/Volume (0–10)
+    const volScore = filteredResult.scoreBreakdown?.volume ?? 0;
+    const brkVol   = filteredResult.scoreBreakdown?.breakoutVolume ?? 0;
+    wcVelocityVol  = Math.min(10, (volScore + Math.max(0, brkVol)) * 3);
+  }
+
+  const wcTotal = Math.round(
+    wcStructure + wcEma + wcMomentum + wcMtf + wcRsi + wcChopFilter + wcVelocityVol
+  );
+  const weightedConfidenceBreakdown = {
+    structure:     wcStructure,
+    ema:           wcEma,
+    momentum:      wcMomentum,
+    mtf:           wcMtf,
+    rsi:           wcRsi,
+    chopFilter:    wcChopFilter,
+    velocityVolume: wcVelocityVol,
+    total:         wcTotal,
+  };
+
+  // ── Strict Signal Quality Gate ────────────────────────────────────────────
+  // Apply weighted confidence only to directional signals. Then enforce:
+  //   < 60  → NO SIGNAL (downgrade to HOLD with block reason)
+  //   < 80  → not auto-trade safe
+  //   Structure blocks buy/sell → downgrade + add warning
+  //   Momentum exhausted → cap confidence at 55, disable stacking
+  let gatedSignal = filteredResult.signal;
+  let gateBlockReason: string | undefined;
+  const allActiveWarnings: string[] = [...(advancedAnalysis?.activeWarnings ?? [])];
+
+  if (decisionSide) {
+    // 1. Structure gate
+    if (structureAnalysis && decisionSide === "BUY" && !structureAnalysis.buyAllowed) {
+      allActiveWarnings.push("STRUCTURE BLOCKED");
+      // If structure quality is NONE, demote to HOLD
+      if (structureAnalysis.structureQuality === "NONE" || structureAnalysis.state === "CHOPPY") {
+        gatedSignal = "HOLD";
+        gateBlockReason = structureAnalysis.blockReason ?? "Choppy structure — no directional edge";
+      }
+    }
+    if (structureAnalysis && decisionSide === "SELL" && !structureAnalysis.sellAllowed) {
+      allActiveWarnings.push("STRUCTURE BLOCKED");
+      if (structureAnalysis.structureQuality === "NONE" || structureAnalysis.state === "CHOPPY") {
+        gatedSignal = "HOLD";
+        gateBlockReason = structureAnalysis.blockReason ?? "Choppy structure — no directional edge";
+      }
+    }
+
+    // 2. Range compression gate
+    if (structureAnalysis?.rangeCompression && structureAnalysis.state === "RANGE_COMPRESSION") {
+      allActiveWarnings.push("RANGE COMPRESSION");
+      if ((filteredResult.score ?? 0) < 4) {
+        gatedSignal = "HOLD";
+        gateBlockReason = "Range compression — wait for expansion";
+      }
+    }
+
+    // 3. Weighted confidence gate (< 60 = NO SIGNAL)
+    if (gatedSignal !== "HOLD" && wcTotal < 60 && (filteredResult.score ?? 0) < 3) {
+      gatedSignal = "HOLD";
+      gateBlockReason = `Weighted confidence too low (${wcTotal}/100) — insufficient alignment`;
+    }
+
+    // 4. Momentum exhaustion warnings
+    if (momentumAnalysis?.exhaustionDetected) {
+      allActiveWarnings.push("MOMENTUM EXHAUSTED");
+    }
+    if (momentumAnalysis && !momentumAnalysis.tradeAllowed) {
+      allActiveWarnings.push("MOMENTUM TOO WEAK");
+    }
+  }
+
+  // Choppy market global gate
+  if (chopScore > 0.72 && (filteredResult.score ?? 0) < 3) {
+    if (gatedSignal !== "HOLD") {
+      gatedSignal = "HOLD";
+      gateBlockReason = "Choppy market — no clear directional edge";
+      allActiveWarnings.push("CHOPPY MARKET — NO TRADE");
+    }
+  }
+
+  // Stacking/auto-trade safety rules
+  const stackingSafe   = !!(
+    momentumAnalysis?.stackingAllowed &&
+    !momentumAnalysis.exhaustionDetected &&
+    (filteredResult.confidence ?? 0) > 80 &&
+    advancedAnalysis?.reversalRisk !== "HIGH" &&
+    advancedAnalysis?.reversalRisk !== "MEDIUM"
+  );
+  const autoTradeSafe = !!(
+    momentumAnalysis?.autoTradeOk &&
+    !momentumAnalysis.exhaustionDetected &&
+    wcTotal >= 80 &&
+    advancedAnalysis?.reversalRisk === "LOW" &&
+    structureAnalysis?.buyAllowed || structureAnalysis?.sellAllowed
+  );
 
   const marketRegime   = classifyMarketRegime(
     indicators.trendDirection, indicators.trendStrength,
@@ -2977,37 +3189,6 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
   const safeTP2        = stripped ? undefined : filteredResult.tp2;
   const safeZoneStatus = stripped ? "NO_ZONE" : (filteredResult.zoneStatus ?? indicators.zoneStatus);
 
-  // Record a confirmed, EXECUTED signal — starts the 3-min cooldown AND
-  // pushes a new slot onto the multi-trade array (up to MAX_ACTIVE_TRADES).
-  // SKIPPED / LIMITED signals are shown in the UI but do NOT open a slot.
-  if (
-    decisionSignal !== "HOLD" && decisionSignal !== "SETUP" && decisionSignal !== "CONFLICT" &&
-    filteredResult.signalStatus === "CONFIRMED" &&
-    (permission === "QUALIFIED" || permission === "ACTIONABLE") &&
-    filteredResult.executionStatus !== "SKIPPED" &&
-    filteredResult.executionStatus !== "LIMITED"
-  ) {
-    lastSignalMemory[tfKey] = {
-      signal: decisionSignal as "BUY" | "SELL",
-      price: currentPrice,
-      timestamp: Date.now(),
-      confidence: filteredResult.confidence,
-    };
-    if (!activeTrades[tfKey]) activeTrades[tfKey] = [];
-    // Cap defensively — should already be enforced by canTakeTrade, but
-    // belt-and-suspenders to avoid unbounded growth.
-    if (activeTrades[tfKey].length < MAX_ACTIVE_TRADES) {
-      activeTrades[tfKey].push({
-        signal: decisionSignal as "BUY" | "SELL",
-        entry: filteredResult.entry,
-        stopLoss: filteredResult.stopLoss,
-        takeProfit: filteredResult.takeProfit,
-        timestamp: Date.now(),
-        confidence: filteredResult.confidence,
-      });
-    }
-  }
-
   // ── Momentum Alignment + Auto Delay Entry ────────────────────────────────
   // Layered AFTER the score engine — never modifies existing fields.
   // Computes RSI direction filter, candle strength gate, and shift detection.
@@ -3045,31 +3226,100 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     momentumAlignmentReason = mom.reason;
   }
 
+  // Use gatedSignal (may have been demoted to HOLD by structure/chop/weighted conf)
+  // Then re-run permission+banner with updated signal
+  const finalSignal = gatedSignal;
+
+  // Re-derive permission using the gated signal
+  const finalPermission = gateBlockReason
+    ? "BLOCKED"
+    : derivePermission(
+        finalSignal,
+        filteredResult.signalStatus,
+        Math.max(5, Math.min(95,
+          wcTotal > 0 && decisionSide
+            ? Math.round(wcTotal * 0.8 + filteredResult.confidence * 0.2)
+            : filteredResult.confidence +
+              (advancedAnalysis && decisionSide ? advancedAnalysis.confidenceAdjustment : 0),
+        )),
+        conflict.level,
+        higherTrend,
+        marketRegime,
+        filteredResult.mtfStatus,
+      );
+
+  // Blend confidence: 80% weighted model + 20% existing score engine
+  // Only applies to directional signals with sufficient data
+  const blendedConfidence = decisionSide && wcTotal > 0
+    ? Math.max(5, Math.min(95,
+        Math.round(wcTotal * 0.8 + filteredResult.confidence * 0.2) +
+        (advancedAnalysis ? advancedAnalysis.confidenceAdjustment : 0) +
+        (momentumAnalysis?.exhaustionDetected ? -10 : 0),
+      ))
+    : Math.max(5, Math.min(95,
+        filteredResult.confidence +
+        (advancedAnalysis && decisionSide ? advancedAnalysis.confidenceAdjustment : 0),
+      ));
+
+  const finalBanner  = gateBlockReason
+    ? `⛔ ${gateBlockReason}`
+    : buildBannerMessage(finalPermission, conflict.level, marketRegime, higherTrend);
+  const finalLabel   = gateBlockReason
+    ? softenedLabel
+    : softenedLabel;
+
+  const finalStripped = finalPermission === "BLOCKED";
+  const finalEntry  = (finalStripped || gateBlockReason) ? 0 : filteredResult.entry;
+  const finalSL     = (finalStripped || gateBlockReason) ? 0 : filteredResult.stopLoss;
+  const finalTP     = (finalStripped || gateBlockReason) ? 0 : filteredResult.takeProfit;
+  const finalTP1    = (finalStripped || gateBlockReason) ? undefined : filteredResult.tp1;
+  const finalTP2    = (finalStripped || gateBlockReason) ? undefined : filteredResult.tp2;
+
+  // Stacking: update active trades only if gated signal still valid
+  if (
+    finalSignal !== "HOLD" && finalSignal !== "SETUP" && finalSignal !== "CONFLICT" &&
+    filteredResult.signalStatus === "CONFIRMED" &&
+    (finalPermission === "QUALIFIED" || finalPermission === "ACTIONABLE") &&
+    filteredResult.executionStatus !== "SKIPPED" &&
+    filteredResult.executionStatus !== "LIMITED"
+  ) {
+    lastSignalMemory[tfKey] = {
+      signal: finalSignal as "BUY" | "SELL",
+      price: currentPrice,
+      timestamp: Date.now(),
+      confidence: blendedConfidence,
+    };
+    if (!activeTrades[tfKey]) activeTrades[tfKey] = [];
+    if (activeTrades[tfKey].length < MAX_ACTIVE_TRADES) {
+      activeTrades[tfKey].push({
+        signal: finalSignal as "BUY" | "SELL",
+        entry: filteredResult.entry,
+        stopLoss: filteredResult.stopLoss,
+        takeProfit: filteredResult.takeProfit,
+        timestamp: Date.now(),
+        confidence: blendedConfidence,
+      });
+    }
+  }
+
   const result: SignalResult = {
     ...filteredResult,
-    signal: decisionSignal,
-    // Apply advanced confidence adjustment — capped to keep value in 5..95.
-    // Only fires on directional BUY/SELL signals; HOLD/SETUP/CONFLICT unchanged.
-    confidence: Math.max(5, Math.min(95,
-      filteredResult.confidence +
-      (advancedAnalysis && (decisionSignal === "BUY" || decisionSignal === "SELL")
-        ? advancedAnalysis.confidenceAdjustment
-        : 0),
-    )),
-    signalLabel: softenedLabel,
-    permission,
+    signal: finalSignal,
+    confidence: blendedConfidence,
+    signalLabel: finalLabel,
+    permission: finalPermission,
     marketRegime,
     conflictLevel:   conflict.level,
     conflictReasons: conflict.reasons,
     indicatorBias,
     chopScore,
-    bannerMessage,
-    entry:      safeEntry,
-    stopLoss:   safeSL,
-    takeProfit: safeTP,
-    tp1:        safeTP1,
-    tp2:        safeTP2,
-    zoneStatus: safeZoneStatus,
+    bannerMessage: finalBanner,
+    entry:      finalEntry,
+    stopLoss:   finalSL,
+    takeProfit: finalTP,
+    tp1:        finalTP1,
+    tp2:        finalTP2,
+    zoneStatus: finalStripped ? "NO_ZONE" : (filteredResult.zoneStatus ?? indicators.zoneStatus),
     pullbackConfirmation: filteredResult.pullbackConfirmation ?? indicators.pullbackConfirmation,
     pullbackState: filteredResult.pullbackState ?? indicators.pullbackState,
     momentumBias:  filteredResult.momentumBias  ?? indicators.momentumBias,
@@ -3077,12 +3327,35 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     momentumAlignmentStatus,
     momentumAlignmentReason,
     momentumShiftDetected,
-    // ── Advanced Momentum Reversal + Smart Trend Engine outputs ──────────────
+    blockReason: gateBlockReason ?? filteredResult.blockReason,
+    // ── Advanced engine outputs ───────────────────────────────────────────
     signalGrade:    advancedAnalysis?.signalGrade,
     trendState:     advancedAnalysis?.trendState,
     reversalRisk:   advancedAnalysis?.reversalRisk,
-    activeWarnings: advancedAnalysis?.activeWarnings,
+    activeWarnings: allActiveWarnings.length > 0 ? allActiveWarnings : advancedAnalysis?.activeWarnings,
     debugInfo:      advancedAnalysis?.debugInfo,
+    // ── Structure engine outputs ─────────────────────────────────────────
+    marketStructure:       structureAnalysis?.state,
+    structureQuality:      structureAnalysis?.structureQuality,
+    structureBlockReason:  structureAnalysis?.blockReason,
+    bosDetected:           structureAnalysis?.bosDetected,
+    bosDirection:          structureAnalysis?.bosDirection,
+    chochDetected:         structureAnalysis?.chochDetected,
+    chochDirection:        structureAnalysis?.chochDirection,
+    liquiditySweepDetected: structureAnalysis?.liquiditySweep,
+    rangeCompression:      structureAnalysis?.rangeCompression,
+    structureLabels:       structureAnalysis?.labels,
+    structureDebug:        structureAnalysis?.debugSummary,
+    // ── Momentum engine outputs ──────────────────────────────────────────
+    momentumQualityScore:      momentumAnalysis?.score,
+    momentumQualityLabel:      momentumAnalysis?.label,
+    momentumExhausted:         momentumAnalysis?.exhaustionDetected,
+    momentumExhaustionReasons: momentumAnalysis?.exhaustionReasons,
+    stackingSafe,
+    autoTradeSafe,
+    momentumDebug:             momentumAnalysis?.debugSummary,
+    // ── Weighted confidence breakdown ─────────────────────────────────────
+    weightedConfidenceBreakdown,
     timestamp: new Date().toISOString(),
   };
 

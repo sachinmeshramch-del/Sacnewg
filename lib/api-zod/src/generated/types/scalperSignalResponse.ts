@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ScalperIndicators } from "./scalperIndicators";
+import type { ScalperSignalResponseBosDirection } from "./scalperSignalResponseBosDirection";
+import type { ScalperSignalResponseChochDirection } from "./scalperSignalResponseChochDirection";
 import type { ScalperSignalResponseConflictLevel } from "./scalperSignalResponseConflictLevel";
 import type { ScalperSignalResponseDebugInfo } from "./scalperSignalResponseDebugInfo";
 import type { ScalperSignalResponseEntryQuality } from "./scalperSignalResponseEntryQuality";
@@ -14,8 +16,10 @@ import type { ScalperSignalResponseIndicatorBias } from "./scalperSignalResponse
 import type { ScalperSignalResponseMarketMode } from "./scalperSignalResponseMarketMode";
 import type { ScalperSignalResponseMarketRegime } from "./scalperSignalResponseMarketRegime";
 import type { ScalperSignalResponseMarketState } from "./scalperSignalResponseMarketState";
+import type { ScalperSignalResponseMarketStructure } from "./scalperSignalResponseMarketStructure";
 import type { ScalperSignalResponseMomentumAlignmentStatus } from "./scalperSignalResponseMomentumAlignmentStatus";
 import type { ScalperSignalResponseMomentumBias } from "./scalperSignalResponseMomentumBias";
+import type { ScalperSignalResponseMomentumQualityLabel } from "./scalperSignalResponseMomentumQualityLabel";
 import type { ScalperSignalResponseMtfStatus } from "./scalperSignalResponseMtfStatus";
 import type { ScalperSignalResponsePermission } from "./scalperSignalResponsePermission";
 import type { ScalperSignalResponsePullbackConfirmation } from "./scalperSignalResponsePullbackConfirmation";
@@ -27,9 +31,11 @@ import type { ScalperSignalResponseSignalGrade } from "./scalperSignalResponseSi
 import type { ScalperSignalResponseSignalStatus } from "./scalperSignalResponseSignalStatus";
 import type { ScalperSignalResponseSignalStrength } from "./scalperSignalResponseSignalStrength";
 import type { ScalperSignalResponseSignalType } from "./scalperSignalResponseSignalType";
+import type { ScalperSignalResponseStructureQuality } from "./scalperSignalResponseStructureQuality";
 import type { ScalperSignalResponseTrend } from "./scalperSignalResponseTrend";
 import type { ScalperSignalResponseTrendState } from "./scalperSignalResponseTrendState";
 import type { ScalperSignalResponseTrendStrength } from "./scalperSignalResponseTrendStrength";
+import type { ScalperSignalResponseWeightedConfidenceBreakdown } from "./scalperSignalResponseWeightedConfidenceBreakdown";
 import type { ScalperSignalResponseZoneStatus } from "./scalperSignalResponseZoneStatus";
 
 export interface ScalperSignalResponse {
@@ -146,6 +152,35 @@ Contains rsiDivergence, macdDecay, oppositeDisplacement, reversalFactors,
 gradeFactors, and confidenceAdj fields.
  */
   debugInfo?: ScalperSignalResponseDebugInfo;
+  /** Institutional market structure state from the structure engine. */
+  marketStructure?: ScalperSignalResponseMarketStructure;
+  /** Quality of the detected structure pattern. */
+  structureQuality?: ScalperSignalResponseStructureQuality;
+  /** Reason why structure engine blocks the current signal side. */
+  structureBlockReason?: string | null;
+  bosDetected?: boolean;
+  bosDirection?: ScalperSignalResponseBosDirection;
+  chochDetected?: boolean;
+  chochDirection?: ScalperSignalResponseChochDirection;
+  liquiditySweepDetected?: boolean;
+  rangeCompression?: boolean;
+  /** HH/HL/LH/LL labels for the last 4 swing points. */
+  structureLabels?: string[];
+  structureDebug?: string;
+  /** 0–100 momentum quality score from the momentum engine. */
+  momentumQualityScore?: number;
+  momentumQualityLabel?: ScalperSignalResponseMomentumQualityLabel;
+  momentumExhausted?: boolean;
+  momentumExhaustionReasons?: string[];
+  /** Whether stacking an additional entry is safe per the momentum engine. */
+  stackingSafe?: boolean;
+  /** Whether the signal meets all auto-trade safety criteria. */
+  autoTradeSafe?: boolean;
+  momentumDebug?: string;
+  /** Breakdown of the weighted confidence model.
+structure(0-25) + ema(0-15) + momentum(0-20) + mtf(0-15) + rsi(0-5) + chopFilter(0-10) + velocityVolume(0-10) = total(0-100)
+ */
+  weightedConfidenceBreakdown?: ScalperSignalResponseWeightedConfidenceBreakdown;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: Date;

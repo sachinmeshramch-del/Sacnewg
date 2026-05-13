@@ -335,26 +335,54 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
-              {/* Active Warnings — Advanced Momentum Reversal Engine badges */}
+              {/* Active Warnings — All engine warning badges */}
               {(data as any).activeWarnings && (data as any).activeWarnings.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1 justify-center">
                   {((data as any).activeWarnings as string[]).map((w: string, i: number) => (
                     <span key={i} className={cn(
                       "px-2 py-0.5 rounded-md text-[9px] font-black tracking-widest uppercase border inline-flex items-center gap-1",
-                      w === "REVERSAL RISK HIGH"     && "border-destructive/70 bg-destructive/15 text-destructive animate-pulse",
-                      w === "MOMENTUM REVERSING"     && "border-destructive/55 bg-destructive/10 text-destructive/90",
-                      w === "STRONG IMPULSE AGAINST" && "border-destructive/45 bg-destructive/8 text-destructive/80",
-                      w === "MACD WEAKENING"         && "border-warning/55 bg-warning/10 text-warning",
-                      w === "TREND EXHAUSTED"        && "border-warning/50 bg-warning/10 text-warning/90",
-                      w === "REVERSAL STARTING"      && "border-amber-400/55 bg-amber-400/10 text-amber-200",
-                      w === "LIQUIDITY TRAP"         && "border-amber-400/55 bg-amber-400/10 text-amber-200",
-                      w === "CHOPPY MARKET"          && "border-muted/50 bg-muted/10 text-muted-foreground",
-                      w === "MOMENTUM DIVERGENCE"    && "border-orange-400/50 bg-orange-400/10 text-orange-200",
+                      (w === "REVERSAL RISK HIGH" || w === "STRUCTURE BLOCKED")
+                                                        && "border-destructive/70 bg-destructive/15 text-destructive animate-pulse",
+                      w === "MOMENTUM REVERSING"        && "border-destructive/55 bg-destructive/10 text-destructive/90",
+                      w === "STRONG IMPULSE AGAINST"    && "border-destructive/45 bg-destructive/8 text-destructive/80",
+                      w === "MACD WEAKENING"            && "border-warning/55 bg-warning/10 text-warning",
+                      (w === "TREND EXHAUSTED" || w === "MOMENTUM EXHAUSTED")
+                                                        && "border-warning/50 bg-warning/10 text-warning/90",
+                      w === "MOMENTUM TOO WEAK"         && "border-warning/50 bg-warning/10 text-warning/80",
+                      (w === "REVERSAL STARTING" || w === "LIQUIDITY TRAP")
+                                                        && "border-amber-400/55 bg-amber-400/10 text-amber-200",
+                      (w === "CHOPPY MARKET" || w === "CHOPPY MARKET — NO TRADE")
+                                                        && "border-muted/50 bg-muted/10 text-muted-foreground",
+                      w === "RANGE COMPRESSION"         && "border-muted/40 bg-muted/8 text-muted-foreground/80",
+                      w === "MOMENTUM DIVERGENCE"       && "border-orange-400/50 bg-orange-400/10 text-orange-200",
                     )}>
                       <span className="text-[8px] leading-none">⚠</span>
                       {w}
                     </span>
                   ))}
+                </div>
+              )}
+
+              {/* Structure Block Banner — fires when structure engine vetoes the signal */}
+              {(data as any).structureBlockReason && (data.signal === "HOLD" || (data as any).activeWarnings?.includes("STRUCTURE BLOCKED")) && (
+                <div className="mt-2 px-3 py-1.5 rounded-md border border-destructive/40 bg-destructive/8 text-destructive/90 text-[10px] font-bold tracking-wide max-w-[300px] text-center">
+                  ⛔ {(data as any).structureBlockReason}
+                </div>
+              )}
+
+              {/* Auto Trade Safety — prominent badge for safe vs blocked auto-trade */}
+              {(data.signal === "BUY" || data.signal === "SELL") && (
+                <div className={cn(
+                  "mt-2 px-3 py-1 rounded-md border text-[9.5px] font-black tracking-widest uppercase inline-flex items-center gap-1.5",
+                  (data as any).autoTradeSafe
+                    ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-300"
+                    : "border-destructive/40 bg-destructive/8 text-destructive/80",
+                )}>
+                  <span className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    (data as any).autoTradeSafe ? "bg-emerald-400" : "bg-destructive animate-pulse",
+                  )} />
+                  {(data as any).autoTradeSafe ? "AUTO TRADE SAFE" : "AUTO TRADE BLOCKED"}
                 </div>
               )}
 
@@ -601,6 +629,79 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                       </span>
                     </div>
                   )}
+
+                  {/* Row: Market Structure */}
+                  {(data as any).marketStructure && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Structure</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px]",
+                        ((data as any).marketStructure === "BOS_BULLISH" || (data as any).marketStructure === "CHOCH_BULLISH" || (data as any).marketStructure === "BULLISH_TRENDING") && "text-success",
+                        ((data as any).marketStructure === "BOS_BEARISH" || (data as any).marketStructure === "CHOCH_BEARISH" || (data as any).marketStructure === "BEARISH_TRENDING") && "text-destructive",
+                        (data as any).marketStructure === "LIQUIDITY_SWEEP" && "text-amber-300",
+                        ((data as any).marketStructure === "CHOPPY" || (data as any).marketStructure === "RANGE_COMPRESSION") && "text-muted-foreground",
+                      )}>
+                        {((data as any).marketStructure as string).replace(/_/g, " ")}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: Momentum Quality Score — visual meter */}
+                  {typeof (data as any).momentumQualityScore === "number" && (
+                    <div className="pt-1 border-t border-border/30 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Momentum</span>
+                        <span className={cn(
+                          "font-bold tracking-widest text-[9px]",
+                          (data as any).momentumQualityScore >= 80 && "text-emerald-300",
+                          (data as any).momentumQualityScore >= 60 && (data as any).momentumQualityScore < 80 && "text-success",
+                          (data as any).momentumQualityScore >= 40 && (data as any).momentumQualityScore < 60 && "text-warning",
+                          (data as any).momentumQualityScore < 40  && "text-destructive/80",
+                        )}>
+                          {(data as any).momentumQualityScore}/100 · {((data as any).momentumQualityLabel as string ?? "").replace(/_/g, " ")}
+                        </span>
+                      </div>
+                      <div className="w-full h-1 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all",
+                            (data as any).momentumQualityScore >= 80 ? "bg-emerald-400" :
+                            (data as any).momentumQualityScore >= 60 ? "bg-success" :
+                            (data as any).momentumQualityScore >= 40 ? "bg-warning" : "bg-destructive/60",
+                          )}
+                          style={{ width: `${(data as any).momentumQualityScore ?? 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Row: Stacking Safe */}
+                  {(data.signal === "BUY" || data.signal === "SELL") && typeof (data as any).stackingSafe === "boolean" && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Stacking</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px]",
+                        (data as any).stackingSafe ? "text-success" : "text-muted-foreground/60",
+                      )}>
+                        {(data as any).stackingSafe ? "✓ SAFE" : "✗ BLOCKED"}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: Structure Labels HH/HL/LH/LL */}
+                  {(data as any).structureLabels && ((data as any).structureLabels as string[]).length > 0 && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Swings</span>
+                      <span className="font-mono text-[9px] tracking-widest text-muted-foreground/70 flex gap-1">
+                        {((data as any).structureLabels as string[]).slice(0, 4).map((lbl: string, i: number) => (
+                          <span key={i} className={cn(
+                            "px-1 rounded",
+                            (lbl === "HH" || lbl === "HL") ? "text-success/80" : "text-destructive/80",
+                          )}>{lbl}</span>
+                        ))}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -759,33 +860,94 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                 </div>
               )}
 
-              {/* Advanced Engine Debug Panel — collapsed by default, dev-only */}
-              {(data as any).debugInfo && (
-                <details className="mt-3 w-full max-w-[280px] mx-auto">
+              {/* Engine Debug Panel — collapsible, shows full breakdown */}
+              {((data as any).debugInfo || (data as any).weightedConfidenceBreakdown || (data as any).structureDebug || (data as any).momentumDebug) && (
+                <details className="mt-3 w-full max-w-[300px] mx-auto">
                   <summary className="cursor-pointer select-none text-[9px] uppercase tracking-widest text-muted-foreground/40 text-center py-1 hover:text-muted-foreground/60 transition-colors">
-                    Advanced Engine Debug ▸
+                    Engine Debug Panel ▸
                   </summary>
-                  <div className="mt-1.5 rounded-md border border-border/30 bg-card/30 px-3 py-2 text-[9px] text-muted-foreground/60 space-y-1 font-mono">
-                    <div><span className="text-muted-foreground/40">RSI Div:</span> {(data as any).debugInfo.rsiDivergence}</div>
-                    <div><span className="text-muted-foreground/40">MACD:</span> {(data as any).debugInfo.macdDecay}</div>
-                    <div><span className="text-muted-foreground/40">Displace:</span> {(data as any).debugInfo.oppositeDisplacement}</div>
-                    <div className={cn(
-                      "font-bold",
-                      (data as any).debugInfo.confidenceAdj < 0 ? "text-destructive/70" :
-                      (data as any).debugInfo.confidenceAdj > 0 ? "text-success/70" : "text-muted-foreground/40"
-                    )}>
-                      Conf Adj: {(data as any).debugInfo.confidenceAdj > 0 ? "+" : ""}{(data as any).debugInfo.confidenceAdj}
-                    </div>
-                    {((data as any).debugInfo.reversalFactors as string[]).length > 0 && (
-                      <div className="text-warning/60">
-                        <span className="text-muted-foreground/40">Risk:</span>{" "}
-                        {((data as any).debugInfo.reversalFactors as string[]).join(" · ")}
+                  <div className="mt-1.5 rounded-md border border-border/30 bg-card/30 px-3 py-2 text-[9px] text-muted-foreground/60 space-y-2 font-mono">
+
+                    {/* Weighted Confidence Breakdown */}
+                    {(data as any).weightedConfidenceBreakdown && (
+                      <div className="space-y-1">
+                        <div className="text-[8px] uppercase tracking-widest text-muted-foreground/40 pb-0.5 border-b border-border/20">Weighted Confidence</div>
+                        {[
+                          { label: "Structure",  val: (data as any).weightedConfidenceBreakdown.structure,     max: 25 },
+                          { label: "EMA",        val: (data as any).weightedConfidenceBreakdown.ema,           max: 15 },
+                          { label: "Momentum",   val: (data as any).weightedConfidenceBreakdown.momentum,      max: 20 },
+                          { label: "MTF",        val: (data as any).weightedConfidenceBreakdown.mtf,           max: 15 },
+                          { label: "RSI",        val: (data as any).weightedConfidenceBreakdown.rsi,           max: 5  },
+                          { label: "Chop",       val: (data as any).weightedConfidenceBreakdown.chopFilter,    max: 10 },
+                          { label: "Vol/Vel",    val: (data as any).weightedConfidenceBreakdown.velocityVolume, max: 10 },
+                        ].map(({ label, val, max }) => (
+                          <div key={label} className="flex items-center gap-2">
+                            <span className="text-muted-foreground/40 w-16 shrink-0">{label}</span>
+                            <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden">
+                              <div
+                                className={cn("h-full rounded-full", val / max >= 0.7 ? "bg-success/60" : val / max >= 0.4 ? "bg-warning/50" : "bg-destructive/40")}
+                                style={{ width: `${Math.round((val / max) * 100)}%` }}
+                              />
+                            </div>
+                            <span className={cn("w-8 text-right", val / max >= 0.7 ? "text-success/70" : val / max >= 0.4 ? "text-warning/60" : "text-destructive/50")}>
+                              {val}/{max}
+                            </span>
+                          </div>
+                        ))}
+                        <div className={cn(
+                          "flex justify-between pt-0.5 border-t border-border/20 font-bold",
+                          (data as any).weightedConfidenceBreakdown.total >= 80 ? "text-success/80" :
+                          (data as any).weightedConfidenceBreakdown.total >= 60 ? "text-warning/70" : "text-destructive/60",
+                        )}>
+                          <span>TOTAL</span>
+                          <span>{(data as any).weightedConfidenceBreakdown.total}/100</span>
+                        </div>
                       </div>
                     )}
-                    {((data as any).debugInfo.gradeFactors as string[]).length > 0 && (
-                      <div className="text-muted-foreground/50">
-                        <span className="text-muted-foreground/40">Grade:</span>{" "}
-                        {((data as any).debugInfo.gradeFactors as string[]).join(" · ")}
+
+                    {/* Structure Engine */}
+                    {(data as any).structureDebug && (
+                      <div className="space-y-0.5">
+                        <div className="text-[8px] uppercase tracking-widest text-muted-foreground/40 pb-0.5 border-b border-border/20">Structure Engine</div>
+                        <div className="text-muted-foreground/50 break-all">{(data as any).structureDebug}</div>
+                      </div>
+                    )}
+
+                    {/* Momentum Engine */}
+                    {(data as any).momentumDebug && (
+                      <div className="space-y-0.5">
+                        <div className="text-[8px] uppercase tracking-widest text-muted-foreground/40 pb-0.5 border-b border-border/20">Momentum Engine</div>
+                        <div className="text-muted-foreground/50 break-all">{(data as any).momentumDebug}</div>
+                      </div>
+                    )}
+
+                    {/* Advanced Engine (RSI div, MACD decay) */}
+                    {(data as any).debugInfo && (
+                      <div className="space-y-0.5">
+                        <div className="text-[8px] uppercase tracking-widest text-muted-foreground/40 pb-0.5 border-b border-border/20">Reversal Engine</div>
+                        <div><span className="text-muted-foreground/40">RSI Div:</span> {(data as any).debugInfo.rsiDivergence}</div>
+                        <div><span className="text-muted-foreground/40">MACD:</span> {(data as any).debugInfo.macdDecay}</div>
+                        <div><span className="text-muted-foreground/40">Displace:</span> {(data as any).debugInfo.oppositeDisplacement}</div>
+                        <div className={cn(
+                          "font-bold",
+                          (data as any).debugInfo.confidenceAdj < 0 ? "text-destructive/70" :
+                          (data as any).debugInfo.confidenceAdj > 0 ? "text-success/70" : "text-muted-foreground/40"
+                        )}>
+                          Conf Adj: {(data as any).debugInfo.confidenceAdj > 0 ? "+" : ""}{(data as any).debugInfo.confidenceAdj}
+                        </div>
+                        {(data as any).debugInfo.reversalFactors?.length > 0 && (
+                          <div className="text-warning/60">Risk: {((data as any).debugInfo.reversalFactors as string[]).join(" · ")}</div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Exhaustion reasons */}
+                    {(data as any).momentumExhaustionReasons?.length > 0 && (
+                      <div className="space-y-0.5">
+                        <div className="text-[8px] uppercase tracking-widest text-warning/40 pb-0.5 border-b border-border/20">Exhaustion Reasons</div>
+                        {((data as any).momentumExhaustionReasons as string[]).map((r: string, i: number) => (
+                          <div key={i} className="text-warning/60">• {r}</div>
+                        ))}
                       </div>
                     )}
                   </div>

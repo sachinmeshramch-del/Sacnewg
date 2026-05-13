@@ -423,6 +423,81 @@ gradeFactors, and confidenceAdj fields.
  */
 export type ScalperSignalResponseDebugInfo = { [key: string]: unknown };
 
+/**
+ * Institutional market structure state from the structure engine.
+ */
+export type ScalperSignalResponseMarketStructure =
+  (typeof ScalperSignalResponseMarketStructure)[keyof typeof ScalperSignalResponseMarketStructure];
+
+export const ScalperSignalResponseMarketStructure = {
+  BULLISH_TRENDING: "BULLISH_TRENDING",
+  BEARISH_TRENDING: "BEARISH_TRENDING",
+  BOS_BULLISH: "BOS_BULLISH",
+  BOS_BEARISH: "BOS_BEARISH",
+  CHOCH_BULLISH: "CHOCH_BULLISH",
+  CHOCH_BEARISH: "CHOCH_BEARISH",
+  LIQUIDITY_SWEEP: "LIQUIDITY_SWEEP",
+  RANGE_COMPRESSION: "RANGE_COMPRESSION",
+  CHOPPY: "CHOPPY",
+} as const;
+
+/**
+ * Quality of the detected structure pattern.
+ */
+export type ScalperSignalResponseStructureQuality =
+  (typeof ScalperSignalResponseStructureQuality)[keyof typeof ScalperSignalResponseStructureQuality];
+
+export const ScalperSignalResponseStructureQuality = {
+  STRONG: "STRONG",
+  MODERATE: "MODERATE",
+  WEAK: "WEAK",
+  NONE: "NONE",
+} as const;
+
+export type ScalperSignalResponseBosDirection =
+  (typeof ScalperSignalResponseBosDirection)[keyof typeof ScalperSignalResponseBosDirection];
+
+export const ScalperSignalResponseBosDirection = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NONE: "NONE",
+} as const;
+
+export type ScalperSignalResponseChochDirection =
+  (typeof ScalperSignalResponseChochDirection)[keyof typeof ScalperSignalResponseChochDirection];
+
+export const ScalperSignalResponseChochDirection = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NONE: "NONE",
+} as const;
+
+export type ScalperSignalResponseMomentumQualityLabel =
+  (typeof ScalperSignalResponseMomentumQualityLabel)[keyof typeof ScalperSignalResponseMomentumQualityLabel];
+
+export const ScalperSignalResponseMomentumQualityLabel = {
+  STRONG_IMPULSE: "STRONG_IMPULSE",
+  GOOD_TREND: "GOOD_TREND",
+  WEAK: "WEAK",
+  NO_TRADE: "NO_TRADE",
+} as const;
+
+/**
+ * Breakdown of the weighted confidence model.
+structure(0-25) + ema(0-15) + momentum(0-20) + mtf(0-15) + rsi(0-5) + chopFilter(0-10) + velocityVolume(0-10) = total(0-100)
+
+ */
+export type ScalperSignalResponseWeightedConfidenceBreakdown = {
+  structure?: number;
+  ema?: number;
+  momentum?: number;
+  mtf?: number;
+  rsi?: number;
+  chopFilter?: number;
+  velocityVolume?: number;
+  total?: number;
+};
+
 export interface ScalperSignalResponse {
   /** BUY/SELL = directional; HOLD = no opportunity; SETUP = trend clear, entry forming; CONFLICT = indicators disagree or chop detected, do not trade. */
   signal: ScalperSignalResponseSignal;
@@ -537,6 +612,35 @@ Contains rsiDivergence, macdDecay, oppositeDisplacement, reversalFactors,
 gradeFactors, and confidenceAdj fields.
  */
   debugInfo?: ScalperSignalResponseDebugInfo;
+  /** Institutional market structure state from the structure engine. */
+  marketStructure?: ScalperSignalResponseMarketStructure;
+  /** Quality of the detected structure pattern. */
+  structureQuality?: ScalperSignalResponseStructureQuality;
+  /** Reason why structure engine blocks the current signal side. */
+  structureBlockReason?: string | null;
+  bosDetected?: boolean;
+  bosDirection?: ScalperSignalResponseBosDirection;
+  chochDetected?: boolean;
+  chochDirection?: ScalperSignalResponseChochDirection;
+  liquiditySweepDetected?: boolean;
+  rangeCompression?: boolean;
+  /** HH/HL/LH/LL labels for the last 4 swing points. */
+  structureLabels?: string[];
+  structureDebug?: string;
+  /** 0–100 momentum quality score from the momentum engine. */
+  momentumQualityScore?: number;
+  momentumQualityLabel?: ScalperSignalResponseMomentumQualityLabel;
+  momentumExhausted?: boolean;
+  momentumExhaustionReasons?: string[];
+  /** Whether stacking an additional entry is safe per the momentum engine. */
+  stackingSafe?: boolean;
+  /** Whether the signal meets all auto-trade safety criteria. */
+  autoTradeSafe?: boolean;
+  momentumDebug?: string;
+  /** Breakdown of the weighted confidence model.
+structure(0-25) + ema(0-15) + momentum(0-20) + mtf(0-15) + rsi(0-5) + chopFilter(0-10) + velocityVolume(0-10) = total(0-100)
+ */
+  weightedConfidenceBreakdown?: ScalperSignalResponseWeightedConfidenceBreakdown;
   timeframe: string;
   indicators: ScalperIndicators;
   timestamp: string;
