@@ -6,6 +6,16 @@ import { runStructureAnalysis } from "./structureEngine.js";
 import type { StructureAnalysis, MarketStructureState } from "./structureEngine.js";
 import { runMomentumAnalysis } from "./momentumEngine.js";
 import type { MomentumAnalysis } from "./momentumEngine.js";
+import { runMoveExtensionFilter } from "./engine/moveExtensionFilter.js";
+import type { MoveExtensionResult } from "./engine/moveExtensionFilter.js";
+import { runEnhancedExhaustion } from "./engine/exhaustionEngine.js";
+import type { ExhaustionResult } from "./engine/exhaustionEngine.js";
+import { runFreshMomentumCheck } from "./engine/freshMomentum.js";
+import type { FreshMomentumResult } from "./engine/freshMomentum.js";
+import { runSRProximityFilter } from "./engine/srProximity.js";
+import type { SRProximityResult } from "./engine/srProximity.js";
+import { runEntryQualityScoring } from "./engine/entryQuality.js";
+import type { EntryQualityResult } from "./engine/entryQuality.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface OHLCData {
@@ -176,6 +186,24 @@ interface SignalResult {
   stackingSafe?: boolean;
   autoTradeSafe?: boolean;
   momentumDebug?: string;
+  // ── Protection Engines (move extension, exhaustion, fresh momentum, S/R) ──
+  moveExtended?: boolean;
+  moveExtensionLabel?: string | null;
+  moveExtensionRatio?: number;
+  enhancedExhaustionScore?: number;
+  enhancedExhaustionReasons?: string[];
+  freshMomentumState?: string;
+  freshMomentumLabel?: string | null;
+  srProximityBlocked?: boolean;
+  supportNearby?: boolean;
+  resistanceNearby?: boolean;
+  srProximityWarning?: string | null;
+  nearestSupport?: number | null;
+  nearestResistance?: number | null;
+  entryQualityGrade?: string;
+  entryQualityScore?: number;
+  entryQualityLabel?: string;
+  entryQualityShowSignal?: boolean;
   // ── Weighted Confidence Breakdown ────────────────────────────────────────
   weightedConfidenceBreakdown?: {
     structure: number;       // 0–25
@@ -3003,6 +3031,85 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
       })
     : null;
 
+  // ── Protection Engines — Move Extension, Exhaustion, Fresh Momentum, S/R ──
+  const rawOpen = ohlc ? cleanArray(ohlc.open) : [];
+
+  const moveExtResult: MoveExtensionResult | null =
+    rawCloses.length >= 5 && filteredResult.signal !== "HOLD"
+      ? runMoveExtensionFilter({
+          close:  rawCloses,
+          ema20:  indicators.ema20,
+          atr:    indicators.atr,
+          signal: filteredResult.signal as "BUY" | "SELL" | "HOLD" | "SETUP" | "CONFLICT",
+        })
+      : null;
+
+  const exhaustionResult: ExhaustionResult | null =
+    rawCloses.length >= 5 && filteredResult.signal !== "HOLD"
+      ? runEnhancedExhaustion({
+          open:              rawOpen,
+          high:              rawHighs,
+          low:               rawLows,
+          close:             rawCloses,
+          atr:               indicators.atr,
+          rsi:               indicators.rsi,
+          prevRsi:           indicators.prevRsi,
+          macdHistogram:     indicators.macdHistogram,
+          prevMacdHistogram: indicators.prevMacdHistogram,
+          ema20:             indicators.ema20,
+          trendDirection:    indicators.trendDirection,
+          signal:            filteredResult.signal as "BUY" | "SELL" | "HOLD" | "SETUP" | "CONFLICT",
+        })
+      : null;
+
+  const freshMomResult: FreshMomentumResult | null =
+    rawCloses.length >= 4 && (filteredResult.signal === "BUY" || filteredResult.signal === "SELL")
+      ? runFreshMomentumCheck({
+          open:              rawOpen,
+          high:              rawHighs,
+          low:               rawLows,
+          close:             rawCloses,
+          atr:               indicators.atr,
+          macdHistogram:     indicators.macdHistogram,
+          prevMacdHistogram: indicators.prevMacdHistogram,
+          signal:            filteredResult.signal as "BUY" | "SELL" | "HOLD" | "SETUP" | "CONFLICT",
+        })
+      : null;
+
+  const srProximityResult: SRProximityResult | null =
+    rawCloses.length >= 10 && (filteredResult.signal === "BUY" || filteredResult.signal === "SELL")
+      ? runSRProximityFilter({
+          high:   rawHighs,
+          low:    rawLows,
+          close:  rawCloses,
+          atr:    indicators.atr,
+          signal: filteredResult.signal as "BUY" | "SELL" | "HOLD" | "SETUP" | "CONFLICT",
+        })
+      : null;
+
+  // ── Entry Quality Score (aggregated) ──────────────────────────────────────
+  const entryQualityResult: EntryQualityResult | null =
+    (filteredResult.signal === "BUY" || filteredResult.signal === "SELL")
+      ? runEntryQualityScoring({
+          moveExtended:         moveExtResult?.blocked ?? false,
+          moveExtensionRatio:   moveExtResult?.extensionRatio ?? 0,
+          exhaustionScore:      exhaustionResult?.score ?? 0,
+          exhaustionDetected:   exhaustionResult?.exhausted ?? false,
+          freshMomentum:        freshMomResult?.fresh ?? false,
+          momentumStale:        freshMomResult?.stale ?? false,
+          waitingForPullback:   freshMomResult?.state === "WAITING_PULLBACK",
+          reversalRisk:         advancedAnalysis?.reversalRisk ?? "LOW",
+          srBlocked:            srProximityResult?.blocked ?? false,
+          supportNearby:        srProximityResult?.supportNearby ?? false,
+          resistanceNearby:     srProximityResult?.resistanceNearby ?? false,
+          momentumQualityScore: momentumAnalysis?.score ?? 50,
+          atrExpanding:         (momentumAnalysis?.atrScore ?? 0) >= 12,
+          pullbackConfirmed:    indicators.pullbackConfirmedBuy || indicators.pullbackConfirmedSell,
+          strongCandle:         indicators.strongCandleBuy || indicators.strongCandleSell,
+          signal:               filteredResult.signal as "BUY" | "SELL" | "HOLD" | "SETUP" | "CONFLICT",
+        })
+      : null;
+
   // ── Weighted Confidence Model ─────────────────────────────────────────────
   // Replaces the simple (score/10)*100 model with a weighted breakdown:
   //   Structure Alignment  = 25%
@@ -3121,6 +3228,53 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     }
     if (momentumAnalysis && !momentumAnalysis.tradeAllowed) {
       allActiveWarnings.push("MOMENTUM TOO WEAK");
+    }
+
+    // 5. Move Extension gate — block if price chased too far from EMA20
+    if (moveExtResult?.blocked) {
+      allActiveWarnings.push("MOVE EXTENDED");
+      gatedSignal = "HOLD";
+      gateBlockReason = moveExtResult.reason ?? "Move already extended — wait for pullback to EMA20";
+    } else if (moveExtResult?.label) {
+      allActiveWarnings.push("MOVE EXTENDED");
+    }
+
+    // 6. Enhanced Exhaustion gate — block on strong exhaustion (score ≥ 5)
+    if (exhaustionResult?.blockSignal) {
+      allActiveWarnings.push("MOMENTUM EXHAUSTED");
+      if (gatedSignal !== "HOLD") {
+        gatedSignal = "HOLD";
+        gateBlockReason = `Momentum exhaustion detected (${exhaustionResult.score}/8 signals) — ${exhaustionResult.reasons[0] ?? "trend running out of steam"}`;
+      }
+    } else if (exhaustionResult?.exhausted) {
+      allActiveWarnings.push("MOMENTUM WEAKENING");
+    }
+
+    // 7. S/R Proximity gate — block if selling into support or buying into resistance
+    if (srProximityResult?.blocked) {
+      allActiveWarnings.push(srProximityResult.warning ?? "S/R BLOCKED");
+      if (gatedSignal !== "HOLD") {
+        gatedSignal = "HOLD";
+        gateBlockReason = srProximityResult.blockReason ?? "Entry blocked by nearby S/R level";
+      }
+    } else if (srProximityResult?.warning) {
+      allActiveWarnings.push(srProximityResult.warning);
+    }
+
+    // 8. Fresh Momentum — warning labels only (confidence penalty applied below)
+    if (freshMomResult?.label) {
+      allActiveWarnings.push(freshMomResult.label);
+    }
+    if (freshMomResult?.state === "WAITING_PULLBACK" && gatedSignal !== "HOLD") {
+      allActiveWarnings.push("WAITING FOR PULLBACK");
+    }
+
+    // 9. Entry Quality gate — D grade = block signal
+    if (entryQualityResult && !entryQualityResult.showSignal && gatedSignal !== "HOLD") {
+      if (entryQualityResult.grade === "D") {
+        gatedSignal = "HOLD";
+        gateBlockReason = `Entry quality ${entryQualityResult.grade} (${entryQualityResult.score}/100) — ${entryQualityResult.negativeFactors[0] ?? "insufficient setup quality"}`;
+      }
     }
   }
 
@@ -3254,7 +3408,11 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     ? Math.max(5, Math.min(95,
         Math.round(wcTotal * 0.8 + filteredResult.confidence * 0.2) +
         (advancedAnalysis ? advancedAnalysis.confidenceAdjustment : 0) +
-        (momentumAnalysis?.exhaustionDetected ? -10 : 0),
+        (momentumAnalysis?.exhaustionDetected ? -10 : 0) +
+        (moveExtResult?.confidencePenalty ?? 0) +
+        (exhaustionResult?.confidencePenalty ?? 0) +
+        (freshMomResult?.confidencePenalty ?? 0) +
+        (srProximityResult?.confidencePenalty ?? 0),
       ))
     : Math.max(5, Math.min(95,
         filteredResult.confidence +
@@ -3354,6 +3512,24 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     stackingSafe,
     autoTradeSafe,
     momentumDebug:             momentumAnalysis?.debugSummary,
+    // ── Protection engine outputs ─────────────────────────────────────────
+    moveExtended:              moveExtResult?.blocked ?? (moveExtResult?.label != null),
+    moveExtensionLabel:        moveExtResult?.label,
+    moveExtensionRatio:        moveExtResult?.extensionRatio,
+    enhancedExhaustionScore:   exhaustionResult?.score,
+    enhancedExhaustionReasons: exhaustionResult?.reasons,
+    freshMomentumState:        freshMomResult?.state,
+    freshMomentumLabel:        freshMomResult?.label,
+    srProximityBlocked:        srProximityResult?.blocked,
+    supportNearby:             srProximityResult?.supportNearby,
+    resistanceNearby:          srProximityResult?.resistanceNearby,
+    srProximityWarning:        srProximityResult?.warning,
+    nearestSupport:            srProximityResult?.nearestSupport,
+    nearestResistance:         srProximityResult?.nearestResistance,
+    entryQualityGrade:         entryQualityResult?.grade,
+    entryQualityScore:         entryQualityResult?.score,
+    entryQualityLabel:         entryQualityResult?.label,
+    entryQualityShowSignal:    entryQualityResult?.showSignal,
     // ── Weighted confidence breakdown ─────────────────────────────────────
     weightedConfidenceBreakdown,
     timestamp: new Date().toISOString(),

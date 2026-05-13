@@ -268,6 +268,22 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                       GRADE {(data as any).signalGrade}
                     </span>
                   )}
+                  {(data as any).entryQualityGrade && (data.signal === "BUY" || data.signal === "SELL") && (
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-md text-[9.5px] font-black tracking-widest uppercase border",
+                      (data as any).entryQualityGrade === "A+" && "border-emerald-400/60 bg-emerald-400/15 text-emerald-300",
+                      (data as any).entryQualityGrade === "A"  && "border-success/60 bg-success/15 text-success",
+                      (data as any).entryQualityGrade === "B"  && "border-primary/50 bg-primary/10 text-primary",
+                      (data as any).entryQualityGrade === "C"  && "border-warning/40 bg-warning/8 text-warning/90",
+                      (data as any).entryQualityGrade === "D"  && "border-destructive/40 bg-destructive/10 text-destructive/70",
+                    )}
+                    title={(data as any).entryQualityLabel}>
+                      EQ {(data as any).entryQualityGrade}
+                      {typeof (data as any).entryQualityScore === "number" && (
+                        <span className="opacity-60 font-bold ml-0.5">({(data as any).entryQualityScore})</span>
+                      )}
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -348,6 +364,7 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                       w === "MACD WEAKENING"            && "border-warning/55 bg-warning/10 text-warning",
                       (w === "TREND EXHAUSTED" || w === "MOMENTUM EXHAUSTED")
                                                         && "border-warning/50 bg-warning/10 text-warning/90",
+                      w === "MOMENTUM WEAKENING"        && "border-warning/40 bg-warning/8 text-warning/80",
                       w === "MOMENTUM TOO WEAK"         && "border-warning/50 bg-warning/10 text-warning/80",
                       (w === "REVERSAL STARTING" || w === "LIQUIDITY TRAP")
                                                         && "border-amber-400/55 bg-amber-400/10 text-amber-200",
@@ -355,6 +372,12 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                                                         && "border-muted/50 bg-muted/10 text-muted-foreground",
                       w === "RANGE COMPRESSION"         && "border-muted/40 bg-muted/8 text-muted-foreground/80",
                       w === "MOMENTUM DIVERGENCE"       && "border-orange-400/50 bg-orange-400/10 text-orange-200",
+                      w === "MOVE EXTENDED"             && "border-red-500/70 bg-red-500/15 text-red-300 animate-pulse",
+                      (w === "SUPPORT NEARBY" || w === "RESISTANCE NEARBY")
+                                                        && "border-amber-500/60 bg-amber-500/10 text-amber-200",
+                      w === "FRESH MOMENTUM"            && "border-emerald-400/60 bg-emerald-400/10 text-emerald-300",
+                      (w === "WAITING FOR PULLBACK" || w === "WAITING FOR CONFIRMATION")
+                                                        && "border-sky-400/55 bg-sky-400/10 text-sky-300",
                     )}>
                       <span className="text-[8px] leading-none">⚠</span>
                       {w}
