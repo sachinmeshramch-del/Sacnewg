@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { getLivePrice, getSignal, getHistory, clearHistory } from "../services/goldService.js";
-import { getFinnhubPrice, isFinnhubConnected } from "../services/finnhubService.js";
+import { getFinnhubPrice, isFinnhubConnected, getCandles } from "../services/finnhubService.js";
 import { getSpotPrice } from "../services/spotGoldService.js";
 import { setTelegramConfig, getTelegramConfig, sendTelegramAlert } from "../services/telegramService.js";
 
@@ -82,7 +82,7 @@ router.get("/telegram/status", (_req, res) => {
 router.get("/status", (_req, res) => {
   res.json({
     finnhubConnected: isFinnhubConnected(),
-    priceSource: isFinnhubConnected() ? "finnhub-websocket" : "yahoo-finance",
+    priceSource: isFinnhubConnected() ? "finnhub-websocket" : "finnhub-rest",
   });
 });
 
@@ -101,38 +101,35 @@ router.get("/candles", async (req, res) => {
       return;
     }
 
-    const { default: fetch } = await import("node-fetch").catch(() => ({ default: globalThis.fetch })) as any;
-    const interval = is1m ? "1m" : "5m";
-    const range = is1m ? "2h" : "2d";
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=${interval}&range=${range}&includePrePost=false`;
+    const interval     = is1m ? "1m" : "5m";
+    const lookbackDays = is1m ? 1 : 2;
 
-    const resp = await globalThis.fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" }
-    });
-    if (!resp.ok) throw new Error("Yahoo fetch failed");
-    const raw = await resp.json() as any;
-    const chart = raw?.chart?.result?.[0];
-    if (!chart) throw new Error("No chart data");
+    const ohlc = await getCandles(interval, lookbackDays);
 
-    const timestamps: number[] = chart.timestamp;
-    const quote = chart.indicators?.quote?.[0];
-    const candles = timestamps.map((t: number, i: number) => ({
-      time: t,
-      open: quote.open[i],
-      high: quote.high[i],
-      low: quote.low[i],
-      close: quote.close[i],
+    if (!ohlc || ohlc.close.length === 0) {
+      // No API key or fetch failed — return empty array so the frontend
+      // degrades gracefully (TradingView widget still shows its own chart).
+      res.json({ candles: [], timeframe, source: "unavailable" });
+      return;
+    }
+
+    const candles = ohlc.timestamps.map((t: number, i: number) => ({
+      time:  t,
+      open:  ohlc.open[i],
+      high:  ohlc.high[i],
+      low:   ohlc.low[i],
+      close: ohlc.close[i],
     })).filter((c: any) => c.open != null && c.high != null && c.low != null && c.close != null);
 
-    const result = { candles, timeframe };
+    const result = { candles, timeframe, source: "finnhub" };
     if (is1m) {
-      candleCache1m = { data: result, expiry: Date.now() + 30000 };
+      candleCache1m = { data: result, expiry: Date.now() + 30_000 };
     } else {
-      candleCache5m = { data: result, expiry: Date.now() + 60000 };
+      candleCache5m = { data: result, expiry: Date.now() + 60_000 };
     }
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch candles" });
+    res.status(500).json({ error: "Failed to fetch candles", candles: [] });
   }
 });
 
@@ -158,11 +155,11 @@ router.get("/tick", async (_req, res) => {
       });
       return;
     }
-    // Last resort: cached price data (may be Yahoo futures)
+    // Last resort: cached price data from Finnhub REST / spot services
     const priceData = await getLivePrice();
     res.json({
       price: priceData.price,
-      source: priceData.source ?? "yahoo",
+      source: priceData.source ?? "finnhub-rest",
       timestamp: priceData.timestamp,
     });
   } catch (err) {

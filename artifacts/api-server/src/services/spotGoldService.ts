@@ -1,6 +1,6 @@
 // Live XAU/USD spot price from free public sources.
-// Aligns the dashboard with TradingView's OANDA:XAUUSD feed (vs Yahoo's GC=F futures
-// which drifts $5–$30 above spot and produces "phantom" signals on the wrong price).
+// Aligns the dashboard with TradingView's OANDA:XAUUSD feed.
+// Used as a spot-price fallback when the Finnhub WebSocket is not yet connected.
 
 interface SpotPrice {
   price: number;

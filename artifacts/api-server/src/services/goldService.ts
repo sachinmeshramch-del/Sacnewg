@@ -1,4 +1,4 @@
-import { getFinnhubPrice, isFinnhubConnected } from "./finnhubService.js";
+import { getFinnhubPrice, isFinnhubConnected, getCandles } from "./finnhubService.js";
 import { getSpotPrice } from "./spotGoldService.js";
 import { runAdvancedAnalysis } from "./advancedEngines.js";
 import type { AdvancedAnalysis, TrendState } from "./advancedEngines.js";
@@ -34,7 +34,7 @@ interface PriceData {
   high24h: number;
   low24h: number;
   timestamp: string;
-  source?: "finnhub" | "yahoo" | "fallback" | "gold-api" | "stooq";
+  source?: "finnhub" | "finnhub-rest" | "fallback" | "gold-api" | "stooq";
 }
 
 interface Indicators {
@@ -403,35 +403,12 @@ const MIN_CONFIDENCE_REVERSAL = 75;  // counter-trend / reversal minimum
 const CONFIRMATION_CANDLES = 2;
 
 // ── Data Fetching ──────────────────────────────────────────────────────────────
-async function fetchYahooFinance(symbol: string, interval: string, range: string): Promise<OHLCData | null> {
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=false`;
-    const resp = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json"
-      }
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json() as any;
-    const chart = data?.chart?.result?.[0];
-    if (!chart) return null;
-
-    const timestamps = chart.timestamp as number[];
-    const quote = chart.indicators?.quote?.[0];
-    if (!timestamps || !quote) return null;
-
-    return {
-      open: quote.open as number[],
-      high: quote.high as number[],
-      low: quote.low as number[],
-      close: quote.close as number[],
-      volume: quote.volume as number[],
-      timestamps,
-    };
-  } catch {
-    return null;
-  }
+// Thin wrapper kept for call-site consistency.
+// All candle data is now fetched from Finnhub REST (OANDA:XAU_USD spot).
+// Returns null when no API key is configured — callers fall through to the
+// existing synthetic-indicator fallback path.
+async function fetchCandles(interval: string, lookbackDays: number): Promise<OHLCData | null> {
+  return getCandles(interval, lookbackDays);
 }
 
 // ── Math Utilities ─────────────────────────────────────────────────────────────
@@ -1017,7 +994,7 @@ function calcIndicators(ohlc: OHLCData, prev: PrevState | null): ExtendedIndicat
   if (zoneStatus === "SELL_ZONE" && sellRejection) pullbackConfirmation = "REJECTION_DETECTED";
 
   // ── Volume spike detection (NEW) ──────────────────────────────────────────
-  // Yahoo intraday volume is sometimes 0 for futures — fall back gracefully.
+  // Finnhub forex candles sometimes return 0-volume bars — fall back gracefully.
   const volSlice = vols.slice(Math.max(0, last - 20), last); // prior 20 bars
   const volNon0  = volSlice.filter(v => v > 0);
   const volumeAvg  = volNon0.length ? volNon0.reduce((a, b) => a + b, 0) / volNon0.length : 0;
@@ -2112,7 +2089,7 @@ let higherTrendExpiry = 0;
 async function getHigherTrend(): Promise<HigherTrend> {
   if (Date.now() < higherTrendExpiry) return cachedHigherTrend;
 
-  const ohlc = await fetchYahooFinance("GC=F", "15m", "5d");
+  const ohlc = await fetchCandles("15m", 7);
   const closes = ohlc ? cleanArray(ohlc.close).filter(c => c > 0) : [];
 
   if (closes.length < 50) {
@@ -2146,13 +2123,12 @@ export async function getLivePrice(): Promise<PriceData> {
   const cacheTtl = finnhub || spot ? 5000 : 15000;
   if (cachedPrice && Date.now() < priceExpiry) return cachedPrice;
 
-  // Yahoo GC=F gives us 24h high/low/range context (futures track spot closely),
-  // but the *displayed* current price always comes from a true spot source so it
-  // matches TradingView's OANDA:XAUUSD chart.
-  const ohlc = await fetchYahooFinance("GC=F", "5m", "1d");
+  // Finnhub 5m candles (OANDA:XAU_USD spot) supply the 24h high/low context.
+  // Already spot-priced — no futures-vs-spot offset correction needed.
+  const ohlc = await fetchCandles("5m", 1);
 
   if (!ohlc) {
-    // Yahoo unavailable — use the freshest spot we have
+    // Candle data unavailable — use the freshest spot price we have
     const live = finnhub
       ? { price: finnhub.price, source: "finnhub" as const }
       : spot
@@ -2194,27 +2170,24 @@ export async function getLivePrice(): Promise<PriceData> {
   // PRICE SOURCE PRIORITY (must match TradingView OANDA:XAUUSD spot):
   //   1. Finnhub WebSocket (OANDA spot)  — sub-second tick
   //   2. gold-api.com / Stooq spot       — ~5s freshness
-  //   3. Yahoo GC=F futures last close   — last resort, drifts vs spot
-  const yahooCurrent = closes[closes.length - 1];
+  //   3. Finnhub REST last candle close  — last resort (still spot)
+  const candleLast   = closes[closes.length - 1];
   const currentPrice = finnhub
     ? finnhub.price
     : spot
       ? spot.price
-      : yahooCurrent;
+      : candleLast;
   const priceSource: PriceData["source"] = finnhub
     ? "finnhub"
     : spot
       ? (spot.source as PriceData["source"])
-      : "yahoo";
+      : "finnhub-rest";
 
-  // Use spot-anchored 24h range when possible to avoid futures-vs-spot offset
-  // contaminating high/low context.
-  const futuresOffset = currentPrice - yahooCurrent;
-  const high24h      = Math.max(...highs) + (priceSource !== "yahoo" ? futuresOffset : 0);
-  const low24h       = Math.min(...lows.filter(l => l > 0)) + (priceSource !== "yahoo" ? futuresOffset : 0);
-
-  const prevClose    = closes[0] + (priceSource !== "yahoo" ? futuresOffset : 0);
-  const change       = currentPrice - prevClose;
+  // All data is already OANDA spot — no futures offset adjustment needed.
+  const high24h       = Math.max(...highs.filter(h => h > 0));
+  const low24h        = Math.min(...lows.filter(l => l > 0));
+  const prevClose     = closes[0];
+  const change        = currentPrice - prevClose;
   const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
 
   cachedPrice = {
@@ -2381,9 +2354,9 @@ function computeSignalScore(
   const volatility = atrPct > 0.005 ? -1 : 0;
 
   // ── Volume Confirmation (per spec — volume is a BOOSTER, never a blocker) ──
-  // We only score volume when we actually have it. Yahoo intraday feeds
-  // sometimes return 0-volume bars for futures; in that case all volume axes
-  // collapse to 0 so a missing feed doesn't penalise the setup.
+  // We only score volume when we actually have it. Finnhub forex candle feeds
+  // sometimes return 0-volume bars; in that case all volume axes collapse to 0
+  // so a missing feed doesn't penalise the setup.
   const hasVolume    = ind.volumeAvg > 0 && ind.volumeLast > 0;
   const volAboveAvg  = hasVolume && ind.volumeLast > ind.volumeAvg;
   const volSpike1p5x = hasVolume && ind.volumeLast > ind.volumeAvg * 1.5;
@@ -2852,13 +2825,15 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
 
   if (cache && Date.now() < expiry) return cache;
 
-  const interval = is1m ? "1m" : "5m";
-  const range    = is1m ? "5d" : "5d";  // 5d ensures enough candles for structure engine (min 10)
+  const interval     = is1m ? "1m" : "5m";
+  // Lookback: 2 days for 1m (≈2,820 bars), 5 days for 5m (≈1,410 bars).
+  // Provides ample history for EMA50, RSI14, MACD, ATR14, and structure analysis.
+  const lookbackDays = is1m ? 2 : 5;
 
   // Fetch entry-TF candles, live spot price, and the higher-TF (15m) trend
   // in parallel — they're independent.
   const [ohlc, priceData, higherTrend] = await Promise.all([
-    fetchYahooFinance("GC=F", interval, range),
+    fetchCandles(interval, lookbackDays),
     getLivePrice(),
     getHigherTrend(),
   ]);
@@ -2872,7 +2847,7 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
   if (ohlc && cleanArray(ohlc.close).filter(c => c > 0).length >= 50) {
     indicators = calcIndicators(ohlc, prev);
   } else {
-    // Fallback synthetic indicators when Yahoo data is insufficient
+    // Fallback synthetic indicators when Finnhub candle data is insufficient (no API key / fetch failed)
     const rsi   = 40 + Math.random() * 20;
     const base  = currentPrice;
     const macdH = (Math.random() - 0.5) * 0.5;
