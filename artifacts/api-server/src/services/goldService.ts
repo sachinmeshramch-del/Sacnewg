@@ -403,12 +403,59 @@ const MIN_CONFIDENCE_REVERSAL = 75;  // counter-trend / reversal minimum
 const CONFIRMATION_CANDLES = 2;
 
 // ── Data Fetching ──────────────────────────────────────────────────────────────
-// Thin wrapper kept for call-site consistency.
-// All candle data is now fetched from Finnhub REST (OANDA:XAU_USD spot).
-// Returns null when no API key is configured — callers fall through to the
-// existing synthetic-indicator fallback path.
+
+// Yahoo Finance range strings for intraday data
+function yahooRange(lookbackDays: number): string {
+  if (lookbackDays <= 1) return "1d";
+  if (lookbackDays <= 5) return "5d";
+  return "1mo";
+}
+
+/**
+ * Fallback candle source: Yahoo Finance GC=F (gold futures).
+ * Used automatically when Finnhub REST returns null (free-plan 403 or no key).
+ * GC=F trades ~$10–30 above spot but candle *patterns* (EMA/RSI/MACD shapes)
+ * remain accurate — indicator calculations are relative, not price-anchored.
+ */
+async function fetchYahooCandles(interval: string, lookbackDays: number): Promise<OHLCData | null> {
+  try {
+    const range = yahooRange(lookbackDays);
+    const url   = `https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=${interval}&range=${range}&includePrePost=false`;
+    const resp  = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept":     "application/json",
+      },
+    });
+    if (!resp.ok) return null;
+    const data  = await resp.json() as any;
+    const chart = data?.chart?.result?.[0];
+    if (!chart) return null;
+    const timestamps: number[] = chart.timestamp;
+    const quote = chart.indicators?.quote?.[0];
+    if (!timestamps || !quote) return null;
+    return {
+      open:       quote.open   as number[],
+      high:       quote.high   as number[],
+      low:        quote.low    as number[],
+      close:      quote.close  as number[],
+      volume:     quote.volume as number[],
+      timestamps,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Primary: Finnhub REST (OANDA:XAU_USD spot, requires paid plan).
+ * Fallback: Yahoo Finance GC=F (futures, free, no key needed).
+ * Returns null only when every source fails → callers use synthetic indicators.
+ */
 async function fetchCandles(interval: string, lookbackDays: number): Promise<OHLCData | null> {
-  return getCandles(interval, lookbackDays);
+  const finnhub = await getCandles(interval, lookbackDays);
+  if (finnhub) return finnhub;
+  return fetchYahooCandles(interval, lookbackDays);
 }
 
 // ── Math Utilities ─────────────────────────────────────────────────────────────

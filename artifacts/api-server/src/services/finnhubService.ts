@@ -63,10 +63,13 @@ interface CandleCache {
 const candleCache = new Map<string, CandleCache>();
 
 // ── WebSocket state ────────────────────────────────────────────────────────
-let latestPrice:    LivePrice | null = null;
-let ws:             WebSocket | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let isConnecting =  false;
+let latestPrice:     LivePrice | null = null;
+let ws:              WebSocket | null = null;
+let reconnectTimer:  ReturnType<typeof setTimeout> | null = null;
+let isConnecting =   false;
+let wsOpenTime:      number = 0;          // when the last WS opened
+let quickCloseCount: number = 0;          // how many times WS closed < 5s after open
+const QUICK_CLOSE_THRESHOLD = 3;          // after this many, treat as unsupported plan
 
 // ── WebSocket connection ───────────────────────────────────────────────────
 function connect() {
@@ -83,6 +86,7 @@ function connect() {
   ws.on("open", () => {
     isConnecting = false;
     reconnectDelay = MIN_RECONNECT_MS;
+    wsOpenTime = Date.now();
     console.log("[Finnhub] WebSocket connected.");
     ws!.send(JSON.stringify({ type: "subscribe", symbol: GOLD_SYMBOL }));
   });
@@ -104,7 +108,28 @@ function connect() {
 
   ws.on("close", () => {
     isConnecting = false;
-    console.log(`[Finnhub] WebSocket closed. Reconnecting in ${Math.round(reconnectDelay / 1000)}s...`);
+    const openDurationMs = wsOpenTime ? Date.now() - wsOpenTime : Infinity;
+
+    if (openDurationMs < 5_000) {
+      // Connection closed almost immediately — likely a plan restriction
+      quickCloseCount++;
+      if (quickCloseCount >= QUICK_CLOSE_THRESHOLD) {
+        // Stop spamming logs; back off to max delay and log once
+        reconnectDelay = MAX_RECONNECT_MS;
+        if (quickCloseCount === QUICK_CLOSE_THRESHOLD) {
+          console.warn(
+            "[Finnhub] WebSocket closes immediately — forex streaming may not be included in your plan. " +
+            "Live spot price will continue via REST fallback. Retrying every 5 min.",
+          );
+        }
+      } else {
+        console.log(`[Finnhub] WebSocket closed quickly (${Math.round(openDurationMs / 1000)}s). Retry ${quickCloseCount}/${QUICK_CLOSE_THRESHOLD}...`);
+      }
+    } else {
+      quickCloseCount = 0; // reset if it stayed open a while
+      console.log(`[Finnhub] WebSocket closed. Reconnecting in ${Math.round(reconnectDelay / 1000)}s...`);
+    }
+
     scheduleReconnect();
   });
 

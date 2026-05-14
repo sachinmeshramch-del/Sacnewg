@@ -103,25 +103,50 @@ router.get("/candles", async (req, res) => {
 
     const interval     = is1m ? "1m" : "5m";
     const lookbackDays = is1m ? 1 : 2;
+    const yahooRange   = lookbackDays <= 1 ? "1d" : "5d";
 
-    const ohlc = await getCandles(interval, lookbackDays);
+    // Try Finnhub first; fall back to Yahoo Finance GC=F if plan doesn't support forex candles
+    let ohlc = await getCandles(interval, lookbackDays);
+    let candleSource = "finnhub";
 
     if (!ohlc || ohlc.close.length === 0) {
-      // No API key or fetch failed — return empty array so the frontend
-      // degrades gracefully (TradingView widget still shows its own chart).
+      try {
+        const url  = `https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=${interval}&range=${yahooRange}&includePrePost=false`;
+        const resp = await globalThis.fetch(url, {
+          headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
+        });
+        if (resp.ok) {
+          const raw   = await resp.json() as any;
+          const chart = raw?.chart?.result?.[0];
+          if (chart?.timestamp) {
+            ohlc = {
+              open:       chart.indicators.quote[0].open,
+              high:       chart.indicators.quote[0].high,
+              low:        chart.indicators.quote[0].low,
+              close:      chart.indicators.quote[0].close,
+              volume:     chart.indicators.quote[0].volume ?? [],
+              timestamps: chart.timestamp,
+            };
+            candleSource = "yahoo";
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (!ohlc || ohlc.close.length === 0) {
       res.json({ candles: [], timeframe, source: "unavailable" });
       return;
     }
 
     const candles = ohlc.timestamps.map((t: number, i: number) => ({
       time:  t,
-      open:  ohlc.open[i],
-      high:  ohlc.high[i],
-      low:   ohlc.low[i],
-      close: ohlc.close[i],
+      open:  ohlc!.open[i],
+      high:  ohlc!.high[i],
+      low:   ohlc!.low[i],
+      close: ohlc!.close[i],
     })).filter((c: any) => c.open != null && c.high != null && c.low != null && c.close != null);
 
-    const result = { candles, timeframe, source: "finnhub" };
+    const result = { candles, timeframe, source: candleSource };
     if (is1m) {
       candleCache1m = { data: result, expiry: Date.now() + 30_000 };
     } else {
