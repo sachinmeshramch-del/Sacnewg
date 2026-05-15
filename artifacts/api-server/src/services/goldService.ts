@@ -16,6 +16,17 @@ import { runSRProximityFilter } from "./engine/srProximity.js";
 import type { SRProximityResult } from "./engine/srProximity.js";
 import { runEntryQualityScoring } from "./engine/entryQuality.js";
 import type { EntryQualityResult } from "./engine/entryQuality.js";
+import { getSession } from "./engine/sessionFilter.js";
+import type { SessionInfo } from "./engine/sessionFilter.js";
+import { detectMarketPhase } from "./engine/marketPhaseEngine.js";
+import type { MarketPhaseResult } from "./engine/marketPhaseEngine.js";
+import { candleAggregator5m } from "./candleAggregator.js";
+
+// Start real-time candle aggregation immediately on server startup.
+// Seeds with 5 days of historical 5m bars; then polls spot price every 10 s
+// so the signal engine always has the current forming candle — enabling
+// earlier signals that fire before a bar fully closes.
+candleAggregator5m.startPolling();
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface OHLCData {
@@ -204,6 +215,16 @@ interface SignalResult {
   entryQualityScore?: number;
   entryQualityLabel?: string;
   entryQualityShowSignal?: boolean;
+  // ── Session & Market Phase ──────────────────────────────────────────────────
+  sessionName?:      string;
+  sessionActive?:    boolean;
+  sessionQuality?:   "HIGH" | "MEDIUM" | "LOW";
+  sessionCode?:      "LONDON" | "NEW_YORK" | "OVERLAP" | "ASIAN" | "OFF_HOURS";
+  marketPhase?:      "TRENDING" | "PULLBACK" | "CHOPPY" | "EXHAUSTION";
+  marketPhaseLabel?: string;
+  emaDistance?:      number;    // price distance from EMA20 in USD
+  emaDistanceATR?:   number;    // distance expressed as ATR multiples
+  pullbackQuality?:  "STRONG" | "MODERATE" | "WEAK" | "NONE";
   // ── Weighted Confidence Breakdown ────────────────────────────────────────
   weightedConfidenceBreakdown?: {
     structure: number;       // 0–25
@@ -448,14 +469,32 @@ async function fetchYahooCandles(interval: string, lookbackDays: number): Promis
 }
 
 /**
- * Primary: Finnhub REST (OANDA:XAU_USD spot, requires paid plan).
- * Fallback: Yahoo Finance GC=F (futures, free, no key needed).
- * Returns null only when every source fails → callers use synthetic indicators.
+ * Primary:    Candle Aggregator — historical bars seeded from market data
+ *             PLUS the current forming 5m candle (built from live spot polls).
+ *             This is what enables EARLIER signals: the engine sees what is
+ *             happening on the live candle, not just closed history.
+ * Secondary:  Finnhub REST (OANDA:XAU_USD; requires paid plan).
+ * Tertiary:   Yahoo Finance GC=F futures (free; internal only; not surfaced
+ *             to users — only used for historical seeding on cold start).
  */
 async function fetchCandles(interval: string, lookbackDays: number): Promise<OHLCData | null> {
+  if (interval === "5m") {
+    // Aggregator is seeded and has live data — use it first (earliest signals)
+    const agg = candleAggregator5m.getCandlesWithCurrentBar();
+    if (agg) return agg;
+  }
+
+  // Finnhub REST (paid plan)
   const finnhub = await getCandles(interval, lookbackDays);
-  if (finnhub) return finnhub;
-  return fetchYahooCandles(interval, lookbackDays);
+  if (finnhub) {
+    if (interval === "5m") candleAggregator5m.mergeHistorical(finnhub);
+    return finnhub;
+  }
+
+  // Historical seeding fallback — kept internal, not surfaced in API responses
+  const yahoo = await fetchYahooCandles(interval, lookbackDays);
+  if (yahoo && interval === "5m") candleAggregator5m.mergeHistorical(yahoo);
+  return yahoo;
 }
 
 // ── Math Utilities ─────────────────────────────────────────────────────────────
@@ -3309,6 +3348,53 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     }
   }
 
+  // ── Session Filter + Market Phase Detection ──────────────────────────────
+  // These run after all protection engines so their results can also be
+  // reflected in gateBlockReason (which finalPermission reads).
+  const sessionInfo     = getSession();
+  const marketPhaseInfo = detectMarketPhase({
+    currentPrice,
+    ema20:           indicators.ema20,
+    atr:             indicators.atr,
+    chopScore:       chopScore ?? 0,
+    trendStrength:   filteredResult.trendStrength,
+    momentumScore:   momentumAnalysis?.score ?? 50,
+    exhaustionScore: exhaustionResult?.score ?? 0,
+    moveExtended:    moveExtResult?.blocked ?? false,
+  });
+
+  const emaDistance    = Math.abs(currentPrice - indicators.ema20);
+  const emaDistanceATR = indicators.atr > 0
+    ? Math.round((emaDistance / indicators.atr) * 10) / 10
+    : 0;
+
+  // Derive pullback quality from existing pullback state + EMA proximity
+  const pullbackQuality: "STRONG" | "MODERATE" | "WEAK" | "NONE" = (() => {
+    if (!filteredResult.pullbackState || filteredResult.pullbackState === "NONE") return "NONE";
+    if (filteredResult.pullbackConfirmation === "REJECTION_DETECTED" && emaDistanceATR <= 1.0) return "STRONG";
+    if (filteredResult.pullbackConfirmation === "REJECTION_DETECTED") return "MODERATE";
+    if (emaDistanceATR <= 1.5) return "WEAK";
+    return "NONE";
+  })();
+
+  // Session warning — low quality sessions generate a caution note
+  if (!sessionInfo.active && (gatedSignal === "BUY" || gatedSignal === "SELL")) {
+    allActiveWarnings.push(`${sessionInfo.label}: signal caution`);
+  }
+
+  // Market Phase gate — CHOPPY and EXHAUSTION block all new entries
+  if ((gatedSignal === "BUY" || gatedSignal === "SELL") && !marketPhaseInfo.allowTrade) {
+    if (!gateBlockReason) {
+      gatedSignal    = "HOLD";
+      gateBlockReason = marketPhaseInfo.phase === "EXHAUSTION"
+        ? `EXHAUSTED MOVE — ${marketPhaseInfo.label}: wait for pullback to EMA20`
+        : `CHOPPY MARKET — ${marketPhaseInfo.label}: no directional edge`;
+    }
+    allActiveWarnings.push(marketPhaseInfo.phase === "EXHAUSTION"
+      ? "EXHAUSTED MOVE — WAIT FOR PULLBACK"
+      : "CHOPPY MARKET — STRUCTURE UNCLEAR");
+  }
+
   // Stacking/auto-trade safety rules
   const stackingSafe   = !!(
     momentumAnalysis?.stackingAllowed &&
@@ -3424,8 +3510,9 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
         filteredResult.mtfStatus,
       );
 
-  // Blend confidence: 80% weighted model + 20% existing score engine
-  // Only applies to directional signals with sufficient data
+  // Blend confidence: 80% weighted model + 20% existing score engine.
+  // Session and market phase adjustments are applied here so the final
+  // confidence number the user sees already reflects all context.
   const blendedConfidence = decisionSide && wcTotal > 0
     ? Math.max(5, Math.min(95,
         Math.round(wcTotal * 0.8 + filteredResult.confidence * 0.2) +
@@ -3434,7 +3521,9 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
         (moveExtResult?.confidencePenalty ?? 0) +
         (exhaustionResult?.confidencePenalty ?? 0) +
         (freshMomResult?.confidencePenalty ?? 0) +
-        (srProximityResult?.confidencePenalty ?? 0),
+        (srProximityResult?.confidencePenalty ?? 0) +
+        sessionInfo.confidenceAdjustment +           // session quality (±0–20)
+        marketPhaseInfo.confidenceAdjustment,        // phase quality (±0–20)
       ))
     : Math.max(5, Math.min(95,
         filteredResult.confidence +
@@ -3552,6 +3641,16 @@ export async function getSignal(timeframe: string): Promise<SignalResult> {
     entryQualityScore:         entryQualityResult?.score,
     entryQualityLabel:         entryQualityResult?.label,
     entryQualityShowSignal:    entryQualityResult?.showSignal,
+    // ── Session & Market Phase ────────────────────────────────────────────
+    sessionName:               sessionInfo.label,
+    sessionActive:             sessionInfo.active,
+    sessionQuality:            sessionInfo.quality,
+    sessionCode:               sessionInfo.session,
+    marketPhase:               marketPhaseInfo.phase,
+    marketPhaseLabel:          marketPhaseInfo.label,
+    emaDistance:               Math.round(emaDistance * 100) / 100,
+    emaDistanceATR,
+    pullbackQuality,
     // ── Weighted confidence breakdown ─────────────────────────────────────
     weightedConfidenceBreakdown,
     timestamp: new Date().toISOString(),

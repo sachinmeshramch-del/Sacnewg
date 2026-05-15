@@ -1,4 +1,80 @@
 {
-  "items": [],
-  "counter": 268
+  "items": [
+    {
+      "id": 278,
+      "signal": "SELL",
+      "confidence": 12,
+      "entry": 4554.01,
+      "stopLoss": 4560.9,
+      "takeProfit": 4538.85,
+      "trend": "BEARISH",
+      "timeframe": "5m",
+      "timestamp": "2026-05-15T09:33:15.827Z",
+      "outcome": "PENDING",
+      "permission": "ACTIONABLE",
+      "signalStatus": "CONFIRMED",
+      "signalType": "WEAK"
+    },
+    {
+      "id": 277,
+      "signal": "SELL",
+      "confidence": 15,
+      "entry": 4555.44,
+      "stopLoss": 4562.08,
+      "takeProfit": 4540.83,
+      "trend": "BEARISH",
+      "timeframe": "5m",
+      "timestamp": "2026-05-15T09:30:24.015Z",
+      "outcome": "PENDING",
+      "permission": "QUALIFIED",
+      "signalStatus": "CONFIRMED",
+      "signalType": "WEAK"
+    },
+    {
+      "id": 276,
+      "signal": "SELL",
+      "confidence": 51,
+      "entry": 4552.82,
+      "stopLoss": 4560.3,
+      "takeProfit": 4536.37,
+      "trend": "BEARISH",
+      "timeframe": "5m",
+      "timestamp": "2026-05-15T09:28:42.230Z",
+      "outcome": "PENDING",
+      "permission": "ACTIONABLE",
+      "signalStatus": "CONFIRMED",
+      "signalType": "MODERATE"
+    },
+    {
+      "id": 275,
+      "signal": "SELL",
+      "confidence": 39,
+      "entry": 4558.15,
+      "stopLoss": 4564.88,
+      "takeProfit": 4543.35,
+      "trend": "BEARISH",
+      "timeframe": "5m",
+      "timestamp": "2026-05-15T09:05:06.482Z",
+      "outcome": "PENDING",
+      "permission": "ACTIONABLE",
+      "signalStatus": "CONFIRMED",
+      "signalType": "WEAK"
+    },
+    {
+      "id": 274,
+      "signal": "SELL",
+      "confidence": 48,
+      "entry": 4558.2,
+      "stopLoss": 4565.06,
+      "takeProfit": 4543.11,
+      "trend": "BEARISH",
+      "timeframe": "5m",
+      "timestamp": "2026-05-15T09:04:54.986Z",
+      "outcome": "PENDING",
+      "permission": "QUALIFIED",
+      "signalStatus": "CONFIRMED",
+      "signalType": "WEAK"
+    }
+  ],
+  "counter": 279
 }

@@ -188,6 +188,32 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
               )}
             </div>
 
+            {/* Session Status */}
+            {(data as any).sessionName && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-muted-foreground">Session:</span>
+                <span className={cn(
+                  "text-[10px] font-bold tracking-widest px-2 py-0.5 rounded border inline-flex items-center gap-1",
+                  (data as any).sessionCode === "OVERLAP"
+                    ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-300"
+                    : (data as any).sessionActive
+                      ? "border-success/40 bg-success/8 text-success/90"
+                      : "border-amber-400/40 bg-amber-400/10 text-amber-200",
+                )}>
+                  <span className={cn(
+                    "w-1.5 h-1.5 rounded-full",
+                    (data as any).sessionCode === "OVERLAP" ? "bg-emerald-400"
+                    : (data as any).sessionActive            ? "bg-success"
+                    :                                          "bg-amber-400",
+                  )} />
+                  {(data as any).sessionName}
+                </span>
+                {!(data as any).sessionActive && (
+                  <span className="text-[9px] text-muted-foreground/50">low-volume session</span>
+                )}
+              </div>
+            )}
+
             {/* Main Signal Badge */}
             <div className="flex flex-col items-center justify-center p-6 rounded-2xl bg-secondary/50 border border-white/5">
               <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3">
@@ -254,6 +280,20 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                   {typeof data.chopScore === "number" && data.chopScore > 0.45 && (
                     <span className="px-2 py-0.5 rounded-md text-[9.5px] font-bold tracking-widest uppercase border border-amber-400/40 bg-amber-400/10 text-amber-200">
                       CHOP {Math.round(data.chopScore * 100)}
+                    </span>
+                  )}
+                  {(data as any).marketPhase && (
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-md text-[9.5px] font-bold tracking-widest uppercase border",
+                      (data as any).marketPhase === "PULLBACK"   && "border-emerald-400/50 bg-emerald-400/10 text-emerald-300",
+                      (data as any).marketPhase === "TRENDING"   && "border-success/40 bg-success/8 text-success/90",
+                      (data as any).marketPhase === "CHOPPY"     && "border-amber-400/40 bg-amber-400/10 text-amber-200",
+                      (data as any).marketPhase === "EXHAUSTION" && "border-destructive/40 bg-destructive/10 text-destructive/80",
+                    )} title={(data as any).marketPhaseLabel ?? ""}>
+                      {(data as any).marketPhase === "PULLBACK"   ? "⟳ PULLBACK"   :
+                       (data as any).marketPhase === "TRENDING"   ? "▲ TRENDING"   :
+                       (data as any).marketPhase === "CHOPPY"     ? "⊡ CHOPPY"     :
+                       "⚠ EXHAUSTED"}
                     </span>
                   )}
                   {(data as any).signalGrade && (data.signal === "BUY" || data.signal === "SELL") && (
@@ -665,6 +705,58 @@ export function SignalPanel({ timeframe, onTimeframeChange }: SignalPanelProps) 
                         ((data as any).marketStructure === "CHOPPY" || (data as any).marketStructure === "RANGE_COMPRESSION") && "text-muted-foreground",
                       )}>
                         {((data as any).marketStructure as string).replace(/_/g, " ")}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: Structure Quality */}
+                  {(data as any).structureQuality && (data as any).structureQuality !== "NONE" && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Structure Quality</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px]",
+                        (data as any).structureQuality === "STRONG"   && "text-emerald-300",
+                        (data as any).structureQuality === "MODERATE" && "text-success",
+                        (data as any).structureQuality === "WEAK"     && "text-warning",
+                      )}>
+                        {(data as any).structureQuality}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: EMA Distance */}
+                  {typeof (data as any).emaDistanceATR === "number" && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">EMA Distance</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px]",
+                        (data as any).emaDistanceATR <= 0.8 ? "text-emerald-300"  :
+                        (data as any).emaDistanceATR <= 1.5 ? "text-success"      :
+                        (data as any).emaDistanceATR <= 2.0 ? "text-warning"      : "text-destructive/80",
+                      )}>
+                        {(data as any).emaDistanceATR}× ATR
+                        {typeof (data as any).emaDistance === "number" && (
+                          <span className="text-muted-foreground/50 ml-1 font-normal">
+                            (${(data as any).emaDistance.toFixed(2)})
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row: Pullback Quality */}
+                  {(data as any).pullbackQuality && (data as any).pullbackQuality !== "NONE" && (
+                    <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                      <span className="text-muted-foreground">Pullback Quality</span>
+                      <span className={cn(
+                        "font-bold tracking-widest text-[9px]",
+                        (data as any).pullbackQuality === "STRONG"   && "text-emerald-300",
+                        (data as any).pullbackQuality === "MODERATE" && "text-success",
+                        (data as any).pullbackQuality === "WEAK"     && "text-warning",
+                      )}>
+                        {(data as any).pullbackQuality === "STRONG"   ? "✓ STRONG PULLBACK"   :
+                         (data as any).pullbackQuality === "MODERATE" ? "✓ MODERATE PULLBACK" :
+                         "WEAK PULLBACK"}
                       </span>
                     </div>
                   )}
